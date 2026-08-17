@@ -8,7 +8,7 @@ Club Craftの開発を引き継いでください。
 Repository:
 https://github.com/earns7572-creator/clubcraft-phase0
 
-最初に CHATGPT_HANDOFF.md を最初から最後まで読み、この文書を製品仕様の正本として扱ってください。
+最初に CHATGPT_HANDOFF.md と ARCHITECTURE_GATE_0_6.md を最初から最後まで読み、これらを製品仕様と0.6.0実装前Gateの正本として扱ってください。
 
 重要:
 現行0.5.0は、4 Speaker固定 + Stereo Spatial Renderer中心のプロトタイプです。
@@ -63,13 +63,13 @@ M. test plan
 
 推奨例として MAX_SPEAKERS=16 / MAX_ROUTES=128 の固定容量方式を検討してよいですが、最適な値は理由とともに提案してください。
 
-この設計回答を出した時点で停止し、実装はまだ行わないでください。
+この設計回答では、ARCHITECTURE_GATE_0_6.md のGate A〜Hを一つずつ満たす具体的な設計判断を表で示してください。この設計回答を出した時点で停止し、実装はまだ行わないでください。
 ```
 
 ## 設計承認後の0.6.0実装プロンプト
 
 ```text
-0.6.0のアーキテクチャ設計を承認します。
+ARCHITECTURE_GATE_0_6.md のGate A〜Hを満たす設計を確認し、0.6.0のアーキテクチャ設計を承認します。
 
 ただし0.6.0ではUIを完成させるのではなく、本来のClub Craftへ戻す基盤変更に限定してください。
 

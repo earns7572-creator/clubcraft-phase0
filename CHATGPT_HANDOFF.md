@@ -485,7 +485,7 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 - SOURCE→Speaker routingを中心に置く
 - Stereo previewとDiscrete outputを分離して考える
 
-まず設計資料を作り、コード変更前にレビューする。
+まず設計資料を作り、コード変更前にレビューする。**実装開始前に [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) のGate A〜Hを設計として明示的に承認すること。**
 
 ### 0.7.0 — Dynamic Speaker Scene
 
@@ -575,7 +575,8 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 7. APVTS / state migration方針を提案
 8. V1上限（例: 16 speakers / 128 routes）を提案
 9. 変更対象ファイル一覧を提示
-10. その設計を承認されるまでコードを書かない
+10. [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) のGate A〜Hを満たす設計を提示する
+11. その設計を承認されるまでコードを書かない
 
 ---
 

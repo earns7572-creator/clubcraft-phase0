@@ -119,6 +119,6 @@ SOURCEはクラブのステージ原点に固定されます。CLUBでは各Spea
 
 ## ChatGPTへの開発引き継ぎ
 
-完成版1.0までの**製品仕様の正本**、可変Speaker、SOURCE→Speaker routing、Binaural / Stereo / 4ch / 8ch出力のロードマップは [CHATGPT_HANDOFF.md](CHATGPT_HANDOFF.md) にまとめています。ChatGPTへ渡す開始文と0.6.0設計依頼は [CHATGPT_PROMPTS.md](CHATGPT_PROMPTS.md) を参照してください。
+完成版1.0までの**製品仕様の正本**、可変Speaker、SOURCE→Speaker routing、Binaural / Stereo / 4ch / 8ch出力のロードマップは [CHATGPT_HANDOFF.md](CHATGPT_HANDOFF.md) にまとめています。0.6.0を実装する前に必ず承認するAudio ownership、Route ownership、legacy migration、multi-channel feasibilityの設計Gateは [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) を参照してください。ChatGPTへ渡す開始文と0.6.0設計依頼は [CHATGPT_PROMPTS.md](CHATGPT_PROMPTS.md) を参照してください。
 
 > `PHASE2_*`、`PHASE3_*`、`FIXED_SOURCE_LAYOUT_*` は0.5.0までのプロトタイプ経緯と既存コード理解のための資料です。4 Speaker固定やStereoSpatialRendererを完成形の要件として扱わず、今後の製品判断は必ず `CHATGPT_HANDOFF.md` を優先してください。
