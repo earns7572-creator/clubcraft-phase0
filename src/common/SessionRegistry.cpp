@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <utility>
 
 namespace clubcraft
@@ -11,12 +12,26 @@ namespace
 {
 constexpr float kMinLevelDb = -96.0f;
 constexpr float kMaxLevelDb = 24.0f;
+constexpr float kMinResponseTone = 0.0f;
+constexpr float kMaxResponseTone = 1.0f;
 
 [[nodiscard]] float decibelsToLinearGain(float levelDb) noexcept
 {
     const auto clampedDb = std::clamp(levelDb, kMinLevelDb, kMaxLevelDb);
     return std::pow(10.0f, clampedDb / 20.0f);
 }
+}
+
+float RealtimeSceneSnapshot::normalizedFullSignalGain() const noexcept
+{
+    const auto totalGain = std::accumulate(speakerLinearGains.begin(), speakerLinearGains.end(), 0.0f);
+    return totalGain / static_cast<float>(speakerLinearGains.size());
+}
+
+SessionSlot::SessionSlot()
+{
+    for (auto& gain : speakerLinearGains)
+        gain.store(1.0f, std::memory_order_relaxed);
 }
 
 SessionRegistry& SessionRegistry::instance()
@@ -36,8 +51,13 @@ void SessionRegistry::publishSnapshot(const SceneSnapshot& snapshot)
 
     const auto beforeWrite = slot->sequence.load(std::memory_order_relaxed);
     slot->sequence.store(beforeWrite + 1, std::memory_order_release);
+
     slot->masterLinearGain.store(decibelsToLinearGain(snapshot.masterLevelDb), std::memory_order_relaxed);
-    slot->primarySpeakerLinearGain.store(decibelsToLinearGain(snapshot.primarySpeakerLevelDb), std::memory_order_relaxed);
+    for (std::size_t index = 0; index < kPhase1SpeakerCount; ++index)
+        slot->speakerLinearGains[index].store(decibelsToLinearGain(snapshot.speakerLevelDb[index]), std::memory_order_relaxed);
+
+    slot->genericResponseTone.store(
+        std::clamp(snapshot.genericResponseTone, kMinResponseTone, kMaxResponseTone), std::memory_order_relaxed);
     slot->revision.store(snapshot.revision, std::memory_order_relaxed);
     slot->published.store(true, std::memory_order_release);
     slot->sequence.store(beforeWrite + 2, std::memory_order_release);
@@ -69,11 +89,12 @@ std::optional<RealtimeSceneSnapshot> SessionRegistry::readSnapshot(const Session
         if ((sequenceBefore & 1U) != 0U)
             continue;
 
-        const RealtimeSceneSnapshot snapshot {
-            .revision = handle->revision.load(std::memory_order_relaxed),
-            .masterLinearGain = handle->masterLinearGain.load(std::memory_order_relaxed),
-            .primarySpeakerLinearGain = handle->primarySpeakerLinearGain.load(std::memory_order_relaxed),
-        };
+        RealtimeSceneSnapshot snapshot;
+        snapshot.revision = handle->revision.load(std::memory_order_relaxed);
+        snapshot.masterLinearGain = handle->masterLinearGain.load(std::memory_order_relaxed);
+        for (std::size_t index = 0; index < kPhase1SpeakerCount; ++index)
+            snapshot.speakerLinearGains[index] = handle->speakerLinearGains[index].load(std::memory_order_relaxed);
+        snapshot.genericResponseTone = handle->genericResponseTone.load(std::memory_order_relaxed);
 
         const auto sequenceAfter = handle->sequence.load(std::memory_order_acquire);
         if (sequenceBefore == sequenceAfter && (sequenceAfter & 1U) == 0U)

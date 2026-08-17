@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include "GenericSpeakerResponse.h"
 #include "SessionRegistry.h"
 
 class ClubCraftPhase0AudioProcessor final : public juce::AudioProcessor,
@@ -53,12 +54,14 @@ private:
     void publishClubSnapshot();
     void registerAsSource();
     void reconcileRole();
+    void restoreLegacyPrimarySpeakerLevel(const juce::ValueTree& restoredState);
 
     juce::AudioProcessorValueTreeState parameters;
     juce::String sessionId { "phase0-default-club" };
     juce::String sourceId;
     juce::String sourceName { "Source" };
     clubcraft::SessionRegistry::SessionHandle sessionHandle;
+    clubcraft::GenericSpeakerResponse genericSpeakerResponse;
     std::atomic<bool> snapshotDirty { true };
     std::atomic<std::uint64_t> revision { 0 };
     std::atomic<bool> lastKnownClubRole { false };

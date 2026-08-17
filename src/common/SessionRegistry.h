@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -11,6 +13,8 @@
 namespace clubcraft
 {
 
+inline constexpr std::size_t kPhase1SpeakerCount = 4;
+
 /**
     Non-realtime control data submitted by the CLUB instance.
     Audio buffers never enter the registry.
@@ -20,7 +24,8 @@ struct SceneSnapshot
     std::string sessionId;
     std::uint64_t revision = 0;
     float masterLevelDb = 0.0f;
-    float primarySpeakerLevelDb = 0.0f;
+    std::array<float, kPhase1SpeakerCount> speakerLevelDb { 0.0f, 0.0f, 0.0f, 0.0f };
+    float genericResponseTone = 1.0f;
 };
 
 /** A value-only snapshot that is safe to copy inside an audio callback. */
@@ -28,7 +33,10 @@ struct RealtimeSceneSnapshot
 {
     std::uint64_t revision = 0;
     float masterLinearGain = 1.0f;
-    float primarySpeakerLinearGain = 1.0f;
+    std::array<float, kPhase1SpeakerCount> speakerLinearGains { 1.0f, 1.0f, 1.0f, 1.0f };
+    float genericResponseTone = 1.0f;
+
+    [[nodiscard]] float normalizedFullSignalGain() const noexcept;
 };
 
 struct SourceRegistration
@@ -50,12 +58,15 @@ struct SessionSlot
     std::atomic<std::uint64_t> sequence { 0 };
     std::atomic<std::uint64_t> revision { 0 };
     std::atomic<float> masterLinearGain { 1.0f };
-    std::atomic<float> primarySpeakerLinearGain { 1.0f };
+    std::array<std::atomic<float>, kPhase1SpeakerCount> speakerLinearGains;
+    std::atomic<float> genericResponseTone { 1.0f };
     std::atomic<bool> published { false };
+
+    SessionSlot();
 };
 
 /**
-    Best-effort, process-local registry for the Phase 0 SOURCE / CLUB handshake.
+    Best-effort, process-local registry for the SOURCE / CLUB handshake.
 
     Source instances acquire a SessionHandle outside the audio callback and use
     readSnapshot(handle) from processBlock(). That operation only reads primitive

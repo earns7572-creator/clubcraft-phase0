@@ -1,5 +1,6 @@
 #include "SessionRegistry.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -13,7 +14,7 @@ void assertNear(float actual, float expected)
     assert(std::abs(actual - expected) < kTolerance);
 }
 
-void testSnapshotPublication()
+void testMultiSpeakerSnapshotPublication()
 {
     auto& registry = clubcraft::SessionRegistry::instance();
     registry.resetForTests();
@@ -26,14 +27,30 @@ void testSnapshotPublication()
         .sessionId = "test-club",
         .revision = 7,
         .masterLevelDb = -6.0f,
-        .primarySpeakerLevelDb = -3.0f,
+        .speakerLevelDb = { 0.0f, -6.0f, -12.0f, -60.0f },
+        .genericResponseTone = 0.35f,
     });
 
     const auto published = clubcraft::SessionRegistry::readSnapshot(handle);
     assert(published.has_value());
     assert(published->revision == 7);
     assertNear(published->masterLinearGain, 0.5011872f);
-    assertNear(published->primarySpeakerLinearGain, 0.7079458f);
+    assertNear(published->speakerLinearGains[0], 1.0f);
+    assertNear(published->speakerLinearGains[1], 0.5011872f);
+    assertNear(published->speakerLinearGains[2], 0.2511886f);
+    assertNear(published->speakerLinearGains[3], 0.001f);
+    assertNear(published->genericResponseTone, 0.35f);
+}
+
+void testFullSignalNormalization()
+{
+    clubcraft::RealtimeSceneSnapshot unityScene;
+    unityScene.speakerLinearGains = { 1.0f, 1.0f, 1.0f, 1.0f };
+    assertNear(unityScene.normalizedFullSignalGain(), 1.0f);
+
+    clubcraft::RealtimeSceneSnapshot mixedScene;
+    mixedScene.speakerLinearGains = { 1.0f, 0.5f, 0.25f, 0.0f };
+    assertNear(mixedScene.normalizedFullSignalGain(), 0.4375f);
 }
 
 void testSourceLifecycle()
@@ -60,7 +77,8 @@ void testSourceLifecycle()
 
 int main()
 {
-    testSnapshotPublication();
+    testMultiSpeakerSnapshotPublication();
+    testFullSignalNormalization();
     testSourceLifecycle();
     std::cout << "ClubCraftCoreTests passed\n";
     return 0;

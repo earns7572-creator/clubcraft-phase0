@@ -1,5 +1,8 @@
 #include "PluginEditor.h"
 
+#include <array>
+#include <cmath>
+
 namespace
 {
 const juce::Colour kBackground { 0xffd9d5cc };
@@ -7,15 +10,30 @@ const juce::Colour kPanel { 0xffebe8e1 };
 const juce::Colour kGraphite { 0xff2c2d2b };
 const juce::Colour kMutedGraphite { 0xff676862 };
 const juce::Colour kAccent { 0xff6c8275 };
+const juce::Colour kDisabled { 0xff969791 };
+
+constexpr std::array<const char*, clubcraft::kPhase1SpeakerCount> kSpeakerNames {
+    "FRONT L",
+    "FRONT R",
+    "REAR L",
+    "REAR R",
+};
+
+constexpr std::array<const char*, clubcraft::kPhase1SpeakerCount> kSpeakerParameterIds {
+    "speakerLevel1",
+    "speakerLevel2",
+    "speakerLevel3",
+    "speakerLevel4",
+};
 }
 
 ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
     ClubCraftPhase0AudioProcessor& processorToUse)
-    : AudioProcessorEditor(&processorToUse), processor(processorToUse)
+    : AudioProcessorEditor(&processorToUse), pluginProcessor(processorToUse)
 {
-    setSize(520, 310);
+    setSize(660, 520);
     setResizable(true, true);
-    setResizeLimits(420, 260, 900, 600);
+    setResizeLimits(520, 410, 1000, 760);
 
     titleLabel.setText("CLUB CRAFT", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(20.0f).withKerningFactor(0.18f));
@@ -43,17 +61,32 @@ ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
 
     connectionLabel.setFont(juce::FontOptions(12.0f));
     connectionLabel.setColour(juce::Label::textColourId, kAccent);
+    connectionLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(connectionLabel);
 
-    configureSlider(masterSlider, masterLabel, "MASTER");
-    configureSlider(speakerSlider, speakerLabel, "PRIMARY SPEAKER");
+    configureDbSlider(masterSlider, masterLabel, "MASTER");
+    configureToneSlider();
+
+    speakerSectionLabel.setText("FULL SIGNAL SPEAKERS", juce::dontSendNotification);
+    speakerSectionLabel.setFont(juce::FontOptions(11.0f).withKerningFactor(0.12f));
+    speakerSectionLabel.setColour(juce::Label::textColourId, kMutedGraphite);
+    addAndMakeVisible(speakerSectionLabel);
+
+    for (std::size_t index = 0; index < clubcraft::kPhase1SpeakerCount; ++index)
+        configureDbSlider(speakerSliders[index], speakerLabels[index], kSpeakerNames[index]);
 
     roleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        processor.getParameters(), "role", roleSelector);
+        pluginProcessor.getParameters(), "role", roleSelector);
     masterAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        processor.getParameters(), "masterLevel", masterSlider);
-    speakerAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        processor.getParameters(), "primarySpeakerLevel", speakerSlider);
+        pluginProcessor.getParameters(), "masterLevel", masterSlider);
+    responseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        pluginProcessor.getParameters(), "genericResponseTone", responseSlider);
+
+    for (std::size_t index = 0; index < clubcraft::kPhase1SpeakerCount; ++index)
+    {
+        speakerAttachments[index] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+            pluginProcessor.getParameters(), kSpeakerParameterIds[index], speakerSliders[index]);
+    }
 
     refreshStatus();
     startTimerHz(10);
@@ -75,9 +108,10 @@ void ClubCraftPhase0AudioProcessorEditor::paint(juce::Graphics& graphics)
     graphics.setColour(kGraphite.withAlpha(0.12f));
     graphics.drawRoundedRectangle(panel.toFloat(), 9.0f, 1.0f);
 
-    const auto dividerY = panel.getY() + panel.getHeight() / 2;
-    graphics.drawLine(static_cast<float>(panel.getX() + 20), static_cast<float>(dividerY),
-                      static_cast<float>(panel.getRight() - 20), static_cast<float>(dividerY), 1.0f);
+    auto divider = panel.reduced(20);
+    const auto dividerY = divider.getY() + 102;
+    graphics.drawLine(static_cast<float>(divider.getX()), static_cast<float>(dividerY),
+                      static_cast<float>(divider.getRight()), static_cast<float>(dividerY), 1.0f);
 }
 
 void ClubCraftPhase0AudioProcessorEditor::resized()
@@ -93,13 +127,22 @@ void ClubCraftPhase0AudioProcessorEditor::resized()
     connectionLabel.setBounds(details);
 
     auto panel = bounds.withTrimmedTop(8).reduced(18);
-    auto masterRow = panel.removeFromTop(panel.getHeight() / 2);
-    auto speakerRow = panel;
-
+    auto masterRow = panel.removeFromTop(46);
     masterLabel.setBounds(masterRow.removeFromLeft(150));
-    masterSlider.setBounds(masterRow.reduced(4, 2));
-    speakerLabel.setBounds(speakerRow.removeFromLeft(150));
-    speakerSlider.setBounds(speakerRow.reduced(4, 2));
+    masterSlider.setBounds(masterRow.reduced(4, 4));
+
+    auto responseRow = panel.removeFromTop(46);
+    responseLabel.setBounds(responseRow.removeFromLeft(150));
+    responseSlider.setBounds(responseRow.reduced(4, 4));
+
+    speakerSectionLabel.setBounds(panel.removeFromTop(28));
+    const auto speakerRowHeight = panel.getHeight() / static_cast<int>(clubcraft::kPhase1SpeakerCount);
+    for (std::size_t index = 0; index < clubcraft::kPhase1SpeakerCount; ++index)
+    {
+        auto row = panel.removeFromTop(speakerRowHeight);
+        speakerLabels[index].setBounds(row.removeFromLeft(150));
+        speakerSliders[index].setBounds(row.reduced(4, 5));
+    }
 }
 
 void ClubCraftPhase0AudioProcessorEditor::timerCallback()
@@ -107,9 +150,9 @@ void ClubCraftPhase0AudioProcessorEditor::timerCallback()
     refreshStatus();
 }
 
-void ClubCraftPhase0AudioProcessorEditor::configureSlider(juce::Slider& slider,
-                                                           juce::Label& label,
-                                                           const juce::String& labelText)
+void ClubCraftPhase0AudioProcessorEditor::configureDbSlider(juce::Slider& slider,
+                                                             juce::Label& label,
+                                                             const juce::String& labelText)
 {
     label.setText(labelText, juce::dontSendNotification);
     label.setFont(juce::FontOptions(12.0f).withKerningFactor(0.08f));
@@ -128,22 +171,54 @@ void ClubCraftPhase0AudioProcessorEditor::configureSlider(juce::Slider& slider,
     addAndMakeVisible(slider);
 }
 
+void ClubCraftPhase0AudioProcessorEditor::configureToneSlider()
+{
+    responseLabel.setText("GENERIC RESPONSE", juce::dontSendNotification);
+    responseLabel.setFont(juce::FontOptions(12.0f).withKerningFactor(0.08f));
+    responseLabel.setColour(juce::Label::textColourId, kGraphite);
+    addAndMakeVisible(responseLabel);
+
+    responseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    responseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 68, 24);
+    responseSlider.textFromValueFunction = [] (double value)
+    {
+        return juce::String(static_cast<int>(std::round(value * 100.0))) + " %";
+    };
+    responseSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        return juce::jlimit(0.0, 1.0, text.retainCharacters("0123456789.").getDoubleValue() / 100.0);
+    };
+    responseSlider.setColour(juce::Slider::trackColourId, kAccent.withAlpha(0.60f));
+    responseSlider.setColour(juce::Slider::thumbColourId, kAccent);
+    responseSlider.setColour(juce::Slider::backgroundColourId, kGraphite.withAlpha(0.10f));
+    responseSlider.setColour(juce::Slider::textBoxTextColourId, kGraphite);
+    responseSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    responseSlider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    addAndMakeVisible(responseSlider);
+}
+
 void ClubCraftPhase0AudioProcessorEditor::refreshStatus()
 {
-    const auto isClub = processor.isClubRole();
-    sessionLabel.setText("SESSION  " + processor.getSessionId(), juce::dontSendNotification);
+    const auto isClub = pluginProcessor.isClubRole();
+    sessionLabel.setText("SESSION  " + pluginProcessor.getSessionId(), juce::dontSendNotification);
 
     if (isClub)
     {
-        connectionLabel.setText("CLUB publisher active", juce::dontSendNotification);
+        connectionLabel.setText("CLUB / 4-speaker scene active", juce::dontSendNotification);
         masterSlider.setEnabled(true);
-        speakerSlider.setEnabled(true);
+        responseSlider.setEnabled(true);
+        for (auto& speakerSlider : speakerSliders)
+            speakerSlider.setEnabled(true);
     }
     else
     {
-        connectionLabel.setText(processor.isConnectedToClub() ? "Connected to CLUB" : "Waiting for CLUB",
-                                juce::dontSendNotification);
+        connectionLabel.setText(pluginProcessor.isConnectedToClub()
+                ? "Connected / Full Signal to 4 speakers"
+                : "Waiting for CLUB",
+            juce::dontSendNotification);
         masterSlider.setEnabled(false);
-        speakerSlider.setEnabled(false);
+        responseSlider.setEnabled(false);
+        for (auto& speakerSlider : speakerSliders)
+            speakerSlider.setEnabled(false);
     }
 }

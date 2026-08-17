@@ -92,3 +92,9 @@ Phase 1では、単一のPrimary Speakerゲインを、`Speaker`／`Route`／`So
 - [Steinberg VST3 SDK](https://github.com/steinbergmedia/vst3sdk) — VST3仕様・SDK。JUCEのVST3サポートの基礎として利用されます。
 
 このプロジェクトは、JUCEの優れたオープンソース基盤に支えられています。役に立った場合は、同プロジェクトへのスターなどでメンテナを支援してください。
+
+## Phase 1: 4-Speaker Full Signal Scene
+
+Phase 1では、同じVST3モジュール内のSOURCE／CLUB共有状態を4本のGeneric Speakerへ拡張しました。CLUBは `FRONT L`、`FRONT R`、`REAR L`、`REAR R` の個別Levelと、全Speakerへ適用する `GENERIC RESPONSE` を公開します。SOURCEは入力ステレオのFull Signalを全Speakerへ分配し、4本の線形ゲインを正規化して合成します。そのため、全Speakerが0 dBならSOURCEの通過レベルも0 dBのままです。
+
+Generic Responseは、0%で約1.2 kHz、100%で約18 kHzのlow-pass cutoffを使う意図的に汎用的なSpeaker colorationです。特定スピーカーモデルや空間測定を表すものではありません。詳細な実機試用は [PHASE1_TRYOUT.md](PHASE1_TRYOUT.md) を参照してください。
