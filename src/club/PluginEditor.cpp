@@ -306,13 +306,20 @@ void ClubCraftPhase0AudioProcessorEditor::refreshStatus()
 
     if (isClub)
     {
-        connectionLabel.setText("CLUB / publishes speaker & listener layout", juce::dontSendNotification);
+        connectionLabel.setText(pluginProcessor.hasClubConflict()
+                ? "CLUB CONFLICT / another CLUB owns this Session"
+                : "CLUB ACTIVE / compiles speaker & route plans",
+            juce::dontSendNotification);
+    }
+    else if (pluginProcessor.wasSourceRekeyed())
+    {
+        connectionLabel.setText("SOURCE ID REKEYED / waiting for explicit routes", juce::dontSendNotification);
     }
     else
     {
         connectionLabel.setText(pluginProcessor.isConnectedToClub()
-                ? "Connected / fixed source follows CLUB layout"
-                : "Waiting for CLUB",
+                ? "SOURCE CONNECTED / follows CLUB route plan"
+                : "WAITING FOR CLUB",
             juce::dontSendNotification);
     }
 }

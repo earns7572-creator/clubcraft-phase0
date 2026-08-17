@@ -119,6 +119,10 @@ SOURCEはクラブのステージ原点に固定されます。CLUBでは各Spea
 
 ## ChatGPTへの開発引き継ぎ
 
-完成版1.0までの**製品仕様の正本**、可変Speaker、SOURCE→Speaker routing、Binaural / Stereo / 4ch / 8ch出力のロードマップは [CHATGPT_HANDOFF.md](CHATGPT_HANDOFF.md) にまとめています。0.6.0を実装する前に必ず承認するAudio ownership、Route ownership、legacy migration、multi-channel feasibilityの設計Gateは [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) を参照してください。ChatGPTへ渡す開始文と0.6.0設計依頼は [CHATGPT_PROMPTS.md](CHATGPT_PROMPTS.md) を参照してください。
+完成版1.0までの**製品仕様の正本**、可変Speaker、SOURCE→Speaker routing、Binaural / Stereo / 4ch / 8ch出力のロードマップは [CHATGPT_HANDOFF.md](CHATGPT_HANDOFF.md) にまとめています。0.6.0を実装する前に必ず承認するAudio ownership、Route ownership、legacy migration、multi-channel feasibilityの設計Gateは [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) を参照してください。ChatGPTの実装提案に対する採用条件と必須修正は [IMPLEMENTATION_REVIEW_0_6.md](IMPLEMENTATION_REVIEW_0_6.md) に記録しています。ChatGPTへ渡す開始文と0.6.0設計依頼は [CHATGPT_PROMPTS.md](CHATGPT_PROMPTS.md) を参照してください。
 
 > `PHASE2_*`、`PHASE3_*`、`FIXED_SOURCE_LAYOUT_*` は0.5.0までのプロトタイプ経緯と既存コード理解のための資料です。4 Speaker固定やStereoSpatialRendererを完成形の要件として扱わず、今後の製品判断は必ず `CHATGPT_HANDOFF.md` を優先してください。
+
+## 0.6.0 Dynamic Scene Foundation
+
+0.6.0では、可変Speaker / source別RoutePlan / schema 7 migrationの内部基盤を導入しました。設計・Realtime安全性・legacy互換の詳細は [PHASE6_FOUNDATION.md](PHASE6_FOUNDATION.md)、Intel MacとAbleton Liveでの試用は [PHASE6_TRYOUT.md](PHASE6_TRYOUT.md)、将来の4ch / 8ch方式を決めるHost I/O調査は [OUTPUT_FEASIBILITY_SPIKE.md](OUTPUT_FEASIBILITY_SPIKE.md) を参照してください。

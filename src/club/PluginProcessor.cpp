@@ -1,39 +1,33 @@
 #include "PluginProcessor.h"
 
 #include "PluginEditor.h"
+#include "SceneState.h"
 
 #include <algorithm>
 #include <array>
 
 namespace
 {
-constexpr int kStateSchemaVersion = 6;
+constexpr int kStateSchemaVersion = 7;
+const juce::Identifier kSchema7StateType { "ClubCraftState" };
+const juce::Identifier kSchema7ApvtsType { "APVTS" };
+
+std::atomic<std::uint64_t> nextRuntimeInstanceToken { 1 };
+
 constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerParameterIds {
-    "speakerLevel1",
-    "speakerLevel2",
-    "speakerLevel3",
-    "speakerLevel4",
+    "speakerLevel1", "speakerLevel2", "speakerLevel3", "speakerLevel4",
 };
-
 constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerTypeParameterIds {
-    "speakerType1",
-    "speakerType2",
-    "speakerType3",
-    "speakerType4",
+    "speakerType1", "speakerType2", "speakerType3", "speakerType4",
 };
-
 constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerPositionXParameterIds {
-    "speakerPositionX1",
-    "speakerPositionX2",
-    "speakerPositionX3",
-    "speakerPositionX4",
+    "speakerPositionX1", "speakerPositionX2", "speakerPositionX3", "speakerPositionX4",
 };
-
 constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerPositionYParameterIds {
-    "speakerPositionY1",
-    "speakerPositionY2",
-    "speakerPositionY3",
-    "speakerPositionY4",
+    "speakerPositionY1", "speakerPositionY2", "speakerPositionY3", "speakerPositionY4",
+};
+constexpr std::array<const char*, clubcraft::kSpeakerCount> kLegacySpeakerNames {
+    "Front L", "Front R", "Rear L", "Rear R",
 };
 
 [[nodiscard]] float readParameter(const juce::AudioProcessorValueTreeState& parameters,
@@ -41,8 +35,12 @@ constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerPositionYPar
 {
     if (const auto* value = parameters.getRawParameterValue(parameterId))
         return value->load();
-
     return 0.0f;
+}
+
+[[nodiscard]] juce::String legacySpeakerId(std::size_t index)
+{
+    return "legacy-speaker-" + juce::String(static_cast<int>(index + 1));
 }
 }
 
@@ -50,9 +48,9 @@ ClubCraftPhase0AudioProcessor::ClubCraftPhase0AudioProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      // Keep the Phase 1 root ID so existing Live Sets restore their parameters.
       parameters(*this, nullptr, juce::Identifier("ClubCraftPhase1State"), createParameterLayout()),
-      sourceId(juce::Uuid().toString())
+      sourceId(juce::Uuid().toString()),
+      runtimeInstanceToken(nextRuntimeInstanceToken.fetch_add(1, std::memory_order_relaxed))
 {
     parameters.addParameterListener("role", this);
     parameters.addParameterListener("masterLevel", this);
@@ -68,15 +66,12 @@ ClubCraftPhase0AudioProcessor::ClubCraftPhase0AudioProcessor()
     for (const auto* parameterId : kSpeakerPositionYParameterIds)
         parameters.addParameterListener(parameterId, this);
 
-    refreshSessionHandle();
-    lastKnownClubRole.store(isClubRole(), std::memory_order_release);
+    rebuildLegacyDynamicSceneFromParameters();
+    refreshSessionHandles();
     sourceName = isClubRole() ? "Club" : "Source";
-
-    if (isClubRole())
-        publishClubSnapshot();
-    else
-        registerAsSource();
-
+    // Force reconcileRole() to perform initial role registration.
+    lastKnownClubRole.store(!isClubRole(), std::memory_order_release);
+    reconcileRole();
     startTimerHz(20);
 }
 
@@ -96,17 +91,22 @@ ClubCraftPhase0AudioProcessor::~ClubCraftPhase0AudioProcessor()
         parameters.removeParameterListener(parameterId, this);
     for (const auto* parameterId : kSpeakerPositionYParameterIds)
         parameters.removeParameterListener(parameterId, this);
-    clubcraft::SessionRegistry::instance().unregisterSource(sourceId.toStdString());
+
+    auto& registry = clubcraft::SessionRegistry::instance();
+    registry.unregisterClubPublisher(sessionId.toStdString(), runtimeInstanceToken);
+    registry.unregisterSource(sessionId.toStdString(), sourceId.toStdString());
 }
 
 void ClubCraftPhase0AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     spatialRenderer.prepare(sampleRate, samplesPerBlock);
+    sourceRouteRenderer.prepare(sampleRate, samplesPerBlock);
 }
 
 void ClubCraftPhase0AudioProcessor::releaseResources()
 {
     spatialRenderer.reset();
+    sourceRouteRenderer.reset();
 }
 
 bool ClubCraftPhase0AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -121,16 +121,41 @@ void ClubCraftPhase0AudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
 
     if (isClubRole())
     {
-        const auto snapshot = clubcraft::SessionRegistry::readSnapshot(sessionHandle);
-        const auto gain = snapshot.has_value()
-            ? snapshot->masterLinearGain
-            : juce::Decibels::decibelsToGain(readParameter(parameters, "masterLevel"));
-        buffer.applyGain(gain);
+        if (const auto scene = clubcraft::SessionRegistry::readRealtimeScene(dynamicSessionHandle))
+        {
+            buffer.applyGain(scene->masterLinearGain);
+            return;
+        }
+
+        if (const auto legacy = clubcraft::SessionRegistry::readSnapshot(legacySessionHandle))
+            buffer.applyGain(legacy->masterLinearGain);
+        else
+            buffer.applyGain(juce::Decibels::decibelsToGain(readParameter(parameters, "masterLevel")));
         return;
     }
 
-    if (const auto snapshot = clubcraft::SessionRegistry::readSnapshot(sessionHandle))
-        spatialRenderer.render(buffer, *snapshot);
+    const auto scene = clubcraft::SessionRegistry::readRealtimeScene(dynamicSessionHandle);
+    const auto routePlan = clubcraft::SessionRegistry::readSourceRoutePlan(sourceRouteHandle);
+    if (scene.has_value() && routePlan.has_value() && scene->revision == routePlan->revision)
+    {
+        lastGoodScene = *scene;
+        lastGoodRoutePlan = *routePlan;
+        hasLastGoodRoutePlan = true;
+        sourceRouteRenderer.render(buffer, lastGoodScene, lastGoodRoutePlan);
+        return;
+    }
+
+    if (hasLastGoodRoutePlan)
+    {
+        sourceRouteRenderer.render(buffer, lastGoodScene, lastGoodRoutePlan);
+        return;
+    }
+
+    // A SOURCE opened before its CLUB remains pass-through until a dynamic plan
+    // arrives. If an old schema session publishes only the legacy snapshot, use
+    // the existing renderer while migration is taking place.
+    if (const auto legacy = clubcraft::SessionRegistry::readSnapshot(legacySessionHandle))
+        spatialRenderer.render(buffer, *legacy);
 }
 
 juce::AudioProcessorEditor* ClubCraftPhase0AudioProcessor::createEditor()
@@ -148,99 +173,55 @@ const juce::String ClubCraftPhase0AudioProcessor::getName() const
     return "Club Craft";
 }
 
-bool ClubCraftPhase0AudioProcessor::acceptsMidi() const
-{
-    return false;
-}
-
-bool ClubCraftPhase0AudioProcessor::producesMidi() const
-{
-    return false;
-}
-
-bool ClubCraftPhase0AudioProcessor::isMidiEffect() const
-{
-    return false;
-}
-
-double ClubCraftPhase0AudioProcessor::getTailLengthSeconds() const
-{
-    return 0.0;
-}
-
-int ClubCraftPhase0AudioProcessor::getNumPrograms()
-{
-    return 1;
-}
-
-int ClubCraftPhase0AudioProcessor::getCurrentProgram()
-{
-    return 0;
-}
-
-void ClubCraftPhase0AudioProcessor::setCurrentProgram(int)
-{
-}
-
-const juce::String ClubCraftPhase0AudioProcessor::getProgramName(int)
-{
-    return {};
-}
-
-void ClubCraftPhase0AudioProcessor::changeProgramName(int, const juce::String&)
-{
-}
+bool ClubCraftPhase0AudioProcessor::acceptsMidi() const { return false; }
+bool ClubCraftPhase0AudioProcessor::producesMidi() const { return false; }
+bool ClubCraftPhase0AudioProcessor::isMidiEffect() const { return false; }
+double ClubCraftPhase0AudioProcessor::getTailLengthSeconds() const { return 0.0; }
+int ClubCraftPhase0AudioProcessor::getNumPrograms() { return 1; }
+int ClubCraftPhase0AudioProcessor::getCurrentProgram() { return 0; }
+void ClubCraftPhase0AudioProcessor::setCurrentProgram(int) {}
+const juce::String ClubCraftPhase0AudioProcessor::getProgramName(int) { return {}; }
+void ClubCraftPhase0AudioProcessor::changeProgramName(int, const juce::String&) {}
 
 void ClubCraftPhase0AudioProcessor::getStateInformation(juce::MemoryBlock& destinationData)
 {
-    auto state = parameters.copyState();
-    state.setProperty("schemaVersion", kStateSchemaVersion, nullptr);
-    state.setProperty("sessionId", sessionId, nullptr);
-    state.setProperty("sourceId", sourceId, nullptr);
-
-    if (auto xml = state.createXml())
+    if (auto xml = makeSchema7State().createXml())
         copyXmlToBinary(*xml, destinationData);
 }
 
 void ClubCraftPhase0AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
-    const auto oldSourceId = sourceId;
-    clubcraft::SessionRegistry::instance().unregisterSource(oldSourceId.toStdString());
+    auto& registry = clubcraft::SessionRegistry::instance();
+    registry.unregisterClubPublisher(sessionId.toStdString(), runtimeInstanceToken);
+    registry.unregisterSource(sessionId.toStdString(), sourceId.toStdString());
+    clubPublisherRegistered = false;
+    clubConflict.store(false, std::memory_order_release);
 
     if (auto xml = getXmlFromBinary(data, sizeInBytes))
     {
         const auto restoredState = juce::ValueTree::fromXml(*xml);
         if (restoredState.isValid())
         {
-            parameters.replaceState(restoredState);
-            restoreLegacyPrimarySpeakerLevel(restoredState);
-            sessionId = restoredState.getProperty("sessionId", sessionId).toString();
-            sourceId = restoredState.getProperty("sourceId", sourceId).toString();
+            if (restoredState.hasType(kSchema7StateType))
+                restoreSchema7State(restoredState);
+            else
+                restoreLegacyState(restoredState);
         }
     }
 
-    refreshSessionHandle();
+    refreshSessionHandles();
     sourceName = isClubRole() ? "Club" : "Source";
     lastKnownClubRole.store(!isClubRole(), std::memory_order_release);
     snapshotDirty.store(true, std::memory_order_release);
+    hasLastGoodRoutePlan = false;
     spatialRenderer.reset();
+    sourceRouteRenderer.reset();
     reconcileRole();
 }
 
-juce::AudioProcessorValueTreeState& ClubCraftPhase0AudioProcessor::getParameters() noexcept
-{
-    return parameters;
-}
-
-const juce::String& ClubCraftPhase0AudioProcessor::getSessionId() const noexcept
-{
-    return sessionId;
-}
-
-const juce::String& ClubCraftPhase0AudioProcessor::getSourceId() const noexcept
-{
-    return sourceId;
-}
+juce::AudioProcessorValueTreeState& ClubCraftPhase0AudioProcessor::getParameters() noexcept { return parameters; }
+const juce::String& ClubCraftPhase0AudioProcessor::getSessionId() const noexcept { return sessionId; }
+const juce::String& ClubCraftPhase0AudioProcessor::getSourceId() const noexcept { return sourceId; }
 
 bool ClubCraftPhase0AudioProcessor::isClubRole() const noexcept
 {
@@ -249,7 +230,17 @@ bool ClubCraftPhase0AudioProcessor::isClubRole() const noexcept
 
 bool ClubCraftPhase0AudioProcessor::isConnectedToClub() const noexcept
 {
-    return clubcraft::SessionRegistry::readSnapshot(sessionHandle).has_value();
+    return clubcraft::SessionRegistry::readRealtimeScene(dynamicSessionHandle).has_value();
+}
+
+bool ClubCraftPhase0AudioProcessor::hasClubConflict() const noexcept
+{
+    return clubConflict.load(std::memory_order_acquire);
+}
+
+bool ClubCraftPhase0AudioProcessor::wasSourceRekeyed() const noexcept
+{
+    return sourceRekeyed.load(std::memory_order_acquire);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout ClubCraftPhase0AudioProcessor::createParameterLayout()
@@ -301,7 +292,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout ClubCraftPhase0AudioProcesso
         "listenerPositionX", "Listener X", juce::NormalisableRange<float>(-12.0f, 12.0f, 0.01f), 0.0f));
     parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
         "listenerPositionY", "Listener Y", juce::NormalisableRange<float>(-12.0f, 12.0f, 0.01f), 0.0f));
-
     return { parameterLayout.begin(), parameterLayout.end() };
 }
 
@@ -314,11 +304,10 @@ void ClubCraftPhase0AudioProcessor::parameterChanged(const juce::String& paramet
 void ClubCraftPhase0AudioProcessor::timerCallback()
 {
     reconcileRole();
-
     if (isClubRole())
     {
-        if (snapshotDirty.exchange(false, std::memory_order_acq_rel))
-            publishClubSnapshot();
+        synchroniseLegacyBridge();
+        publishClubScenes();
     }
     else
     {
@@ -326,40 +315,50 @@ void ClubCraftPhase0AudioProcessor::timerCallback()
     }
 }
 
-void ClubCraftPhase0AudioProcessor::refreshSessionHandle()
+void ClubCraftPhase0AudioProcessor::refreshSessionHandles()
 {
-    sessionHandle = clubcraft::SessionRegistry::instance().acquireSession(sessionId.toStdString());
+    auto& registry = clubcraft::SessionRegistry::instance();
+    legacySessionHandle = registry.acquireSession(sessionId.toStdString());
+    dynamicSessionHandle = registry.acquireDynamicSession(sessionId.toStdString());
+    sourceRouteHandle = registry.acquireSourceRoute(sessionId.toStdString(), sourceId.toStdString());
 }
 
-void ClubCraftPhase0AudioProcessor::publishClubSnapshot()
+void ClubCraftPhase0AudioProcessor::publishClubScenes()
 {
     if (!isClubRole())
         return;
 
-    clubcraft::SceneSnapshot snapshot;
-    snapshot.sessionId = sessionId.toStdString();
-    snapshot.revision = revision.fetch_add(1, std::memory_order_relaxed) + 1;
-    snapshot.masterLevelDb = readParameter(parameters, "masterLevel");
-    for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
-    {
-        snapshot.speakerLevelDb[index] = readParameter(parameters, kSpeakerParameterIds[index]);
-        snapshot.speakerTypes[index] = clubcraft::speakerTypeFromParameterIndex(
-            static_cast<int>(readParameter(parameters, kSpeakerTypeParameterIds[index])));
-    }
-    for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
-    {
-        snapshot.speakerPositions[index] = {
-            readParameter(parameters, kSpeakerPositionXParameterIds[index]),
-            readParameter(parameters, kSpeakerPositionYParameterIds[index]),
-        };
-    }
-    snapshot.listenerPosition = {
-        readParameter(parameters, "listenerPositionX"),
-        readParameter(parameters, "listenerPositionY"),
-    };
-    snapshot.genericResponseTone = readParameter(parameters, "genericResponseTone");
+    auto& registry = clubcraft::SessionRegistry::instance();
+    const auto publisher = registry.registerClubPublisher(sessionId.toStdString(), runtimeInstanceToken);
+    clubPublisherRegistered = publisher.authoritative;
+    clubConflict.store(publisher.conflict, std::memory_order_release);
+    if (!publisher.authoritative)
+        return;
 
-    clubcraft::SessionRegistry::instance().publishSnapshot(snapshot);
+    const auto sources = registry.getSourcesForSession(sessionId.toStdString());
+    std::vector<std::string> sourceIds;
+    sourceIds.reserve(sources.size());
+    for (const auto& source : sources)
+        sourceIds.push_back(source.sourceId);
+
+    clubcraft::CompiledScene compiled;
+    const auto nextRevision = revision.fetch_add(1, std::memory_order_relaxed) + 1;
+    const auto compileError = sceneCompiler.compile(dynamicScene, sourceIds, nextRevision, compiled);
+    if (compileError.hasError())
+        return;
+
+    if (!registry.publishRealtimeScene(sessionId.toStdString(), runtimeInstanceToken, compiled.realtimeScene))
+        return;
+
+    for (const auto& [compiledSourceId, routePlan] : compiled.sourcePlans)
+    {
+        const auto published = registry.publishSourceRoutePlan(
+            sessionId.toStdString(), runtimeInstanceToken, compiledSourceId, routePlan);
+        if (!published)
+            return;
+    }
+
+    snapshotDirty.store(false, std::memory_order_release);
 }
 
 void ClubCraftPhase0AudioProcessor::registerAsSource()
@@ -367,34 +366,67 @@ void ClubCraftPhase0AudioProcessor::registerAsSource()
     if (isClubRole())
         return;
 
-    clubcraft::SessionRegistry::instance().registerSource({
+    auto& registry = clubcraft::SessionRegistry::instance();
+    const auto result = registry.registerSource({
         .sourceId = sourceId.toStdString(),
         .sessionId = sessionId.toStdString(),
         .displayName = sourceName.toStdString(),
         .position = { 0.0f, 0.0f },
         .heartbeat = revision.fetch_add(1, std::memory_order_relaxed) + 1,
+        .runtimeInstanceToken = runtimeInstanceToken,
     });
+
+    if (result.requiresRekey())
+    {
+        sourceId = juce::Uuid().toString();
+        sourceRekeyed.store(true, std::memory_order_release);
+        const auto retry = registry.registerSource({
+            .sourceId = sourceId.toStdString(),
+            .sessionId = sessionId.toStdString(),
+            .displayName = sourceName.toStdString(),
+            .position = { 0.0f, 0.0f },
+            .heartbeat = revision.fetch_add(1, std::memory_order_relaxed) + 1,
+            .runtimeInstanceToken = runtimeInstanceToken,
+        });
+        if (!retry.accepted())
+            return;
+    }
+
+    refreshSessionHandles();
 }
 
 void ClubCraftPhase0AudioProcessor::reconcileRole()
 {
     const auto currentRole = isClubRole();
     const auto previousRole = lastKnownClubRole.exchange(currentRole, std::memory_order_acq_rel);
-
     if (currentRole == previousRole)
         return;
 
-    if (!previousRole)
-        clubcraft::SessionRegistry::instance().unregisterSource(sourceId.toStdString());
+    auto& registry = clubcraft::SessionRegistry::instance();
+    if (previousRole)
+        registry.unregisterClubPublisher(sessionId.toStdString(), runtimeInstanceToken);
+    else
+        registry.unregisterSource(sessionId.toStdString(), sourceId.toStdString());
 
+    clubPublisherRegistered = false;
+    clubConflict.store(false, std::memory_order_release);
     sourceName = currentRole ? "Club" : "Source";
     snapshotDirty.store(true, std::memory_order_release);
+    hasLastGoodRoutePlan = false;
     spatialRenderer.reset();
+    sourceRouteRenderer.reset();
 
     if (currentRole)
-        publishClubSnapshot();
+    {
+        const auto publisher = registry.registerClubPublisher(sessionId.toStdString(), runtimeInstanceToken);
+        clubPublisherRegistered = publisher.authoritative;
+        clubConflict.store(publisher.conflict, std::memory_order_release);
+        publishClubScenes();
+    }
     else
+    {
         registerAsSource();
+    }
 }
 
 void ClubCraftPhase0AudioProcessor::restoreLegacyPrimarySpeakerLevel(const juce::ValueTree& restoredState)
@@ -406,6 +438,102 @@ void ClubCraftPhase0AudioProcessor::restoreLegacyPrimarySpeakerLevel(const juce:
     const auto legacyValue = static_cast<float>(legacyParameter.getProperty("value", 0.0f));
     if (auto* speakerOne = parameters.getParameter("speakerLevel1"))
         speakerOne->setValueNotifyingHost(speakerOne->convertTo0to1(legacyValue));
+}
+
+void ClubCraftPhase0AudioProcessor::rebuildLegacyDynamicSceneFromParameters()
+{
+    dynamicScene = {};
+    dynamicScene.legacyDefaultRouting = true;
+    dynamicScene.legacyRouteGain = 0.25f;
+    dynamicScene.masterLevelDb = readParameter(parameters, "masterLevel");
+    dynamicScene.genericResponseTone = readParameter(parameters, "genericResponseTone");
+    dynamicScene.listener = {
+        readParameter(parameters, "listenerPositionX"),
+        readParameter(parameters, "listenerPositionY"),
+    };
+
+    dynamicScene.speakers.reserve(clubcraft::kSpeakerCount);
+    for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
+    {
+        dynamicScene.speakers.push_back({
+            .stableId = legacySpeakerId(index).toStdString(),
+            .name = kLegacySpeakerNames[index],
+            .type = clubcraft::speakerTypeFromParameterIndex(
+                static_cast<int>(readParameter(parameters, kSpeakerTypeParameterIds[index]))),
+            .position = {
+                readParameter(parameters, kSpeakerPositionXParameterIds[index]),
+                readParameter(parameters, kSpeakerPositionYParameterIds[index]),
+            },
+            .levelDb = readParameter(parameters, kSpeakerParameterIds[index]),
+            .enabled = true,
+        });
+    }
+}
+
+void ClubCraftPhase0AudioProcessor::synchroniseLegacyBridge()
+{
+    if (dynamicScene.speakers.empty())
+        rebuildLegacyDynamicSceneFromParameters();
+
+    dynamicScene.masterLevelDb = readParameter(parameters, "masterLevel");
+    dynamicScene.genericResponseTone = readParameter(parameters, "genericResponseTone");
+    dynamicScene.listener = {
+        readParameter(parameters, "listenerPositionX"),
+        readParameter(parameters, "listenerPositionY"),
+    };
+
+    const auto bridgedSpeakerCount = std::min(dynamicScene.speakers.size(), clubcraft::kSpeakerCount);
+    for (std::size_t index = 0; index < bridgedSpeakerCount; ++index)
+    {
+        auto& speaker = dynamicScene.speakers[index];
+        speaker.levelDb = readParameter(parameters, kSpeakerParameterIds[index]);
+        speaker.type = clubcraft::speakerTypeFromParameterIndex(
+            static_cast<int>(readParameter(parameters, kSpeakerTypeParameterIds[index])));
+        speaker.position = {
+            readParameter(parameters, kSpeakerPositionXParameterIds[index]),
+            readParameter(parameters, kSpeakerPositionYParameterIds[index]),
+        };
+    }
+}
+
+juce::ValueTree ClubCraftPhase0AudioProcessor::makeSchema7State()
+{
+    juce::ValueTree state { kSchema7StateType };
+    state.setProperty("schemaVersion", kStateSchemaVersion, nullptr);
+    state.setProperty("sessionId", sessionId, nullptr);
+    state.setProperty("sourceId", sourceId, nullptr);
+
+    juce::ValueTree apvtsWrapper { kSchema7ApvtsType };
+    apvtsWrapper.appendChild(parameters.copyState(), nullptr);
+    state.appendChild(apvtsWrapper, nullptr);
+    if (isClubRole())
+        state.appendChild(clubcraft::scene_state::toValueTree(dynamicScene), nullptr);
+    return state;
+}
+
+void ClubCraftPhase0AudioProcessor::restoreSchema7State(const juce::ValueTree& state)
+{
+    const auto apvtsWrapper = state.getChildWithName(kSchema7ApvtsType);
+    if (apvtsWrapper.isValid() && apvtsWrapper.getNumChildren() == 1)
+        parameters.replaceState(apvtsWrapper.getChild(0));
+
+    sessionId = state.getProperty("sessionId", sessionId).toString();
+    sourceId = state.getProperty("sourceId", sourceId).toString();
+
+    if (const auto dynamicTree = state.getChildWithName(clubcraft::scene_state::kDynamicSceneTreeType);
+        const auto restoredScene = clubcraft::scene_state::fromValueTree(dynamicTree))
+        dynamicScene = *restoredScene;
+    else
+        rebuildLegacyDynamicSceneFromParameters();
+}
+
+void ClubCraftPhase0AudioProcessor::restoreLegacyState(const juce::ValueTree& state)
+{
+    parameters.replaceState(state);
+    restoreLegacyPrimarySpeakerLevel(state);
+    sessionId = state.getProperty("sessionId", sessionId).toString();
+    sourceId = state.getProperty("sourceId", sourceId).toString();
+    rebuildLegacyDynamicSceneFromParameters();
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

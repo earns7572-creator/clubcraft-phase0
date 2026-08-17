@@ -50,7 +50,7 @@ public:
     }
 
     void render(juce::AudioBuffer<float>& buffer,
-                const RealtimeSceneSnapshot& scene) noexcept
+                const LegacyRealtimeSceneSnapshot& scene) noexcept
     {
         if (buffer.getNumChannels() < 2 || monoDelayLine.empty())
             return;

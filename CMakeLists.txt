@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ClubCraftPhase0 VERSION 0.5.0 LANGUAGES C CXX)
+project(ClubCraftPhase0 VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,8 @@ add_subdirectory(JUCE)
 
 add_library(ClubCraftCore STATIC
     src/common/SessionRegistry.cpp
+    src/common/SceneCompiler.cpp
+    src/common/SceneState.cpp
 )
 
 target_include_directories(ClubCraftCore
@@ -25,10 +27,15 @@ target_include_directories(ClubCraftCore
         ${CMAKE_CURRENT_SOURCE_DIR}/src/common
 )
 
+target_link_libraries(ClubCraftCore PUBLIC juce::juce_data_structures)
+
 target_compile_features(ClubCraftCore PUBLIC cxx_std_20)
 set_target_properties(ClubCraftCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_compile_definitions(ClubCraftCore
+    PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
     PRIVATE
         $<$<CONFIG:Debug>:CLUBCRAFT_DEBUG_BUILD=1>
 )
@@ -88,6 +95,8 @@ if(CLUBCRAFT_BUILD_TESTS)
 
     add_executable(ClubCraftCoreTests
         tests/SessionRegistryTests.cpp
+        tests/SceneCompilerTests.cpp
+        tests/SourceRouteRendererTests.cpp
     )
 
     target_link_libraries(ClubCraftCoreTests

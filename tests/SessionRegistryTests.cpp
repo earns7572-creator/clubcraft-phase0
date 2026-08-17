@@ -9,6 +9,9 @@
 #include <iostream>
 #include <numbers>
 
+void runSceneCompilerTests();
+void runSourceRouteRendererTests();
+
 namespace
 {
 constexpr float kTolerance = 0.0001f;
@@ -127,11 +130,11 @@ void testSpeakerCharacterResponses()
 
 void testFullSignalNormalization()
 {
-    clubcraft::RealtimeSceneSnapshot unityScene;
+    clubcraft::LegacyRealtimeSceneSnapshot unityScene;
     unityScene.speakerLinearGains = { 1.0f, 1.0f, 1.0f, 1.0f };
     assertNear(unityScene.normalizedFullSignalGain(), 1.0f);
 
-    clubcraft::RealtimeSceneSnapshot mixedScene;
+    clubcraft::LegacyRealtimeSceneSnapshot mixedScene;
     mixedScene.speakerLinearGains = { 1.0f, 0.5f, 0.25f, 0.0f };
     assertNear(mixedScene.normalizedFullSignalGain(), 0.4375f);
 }
@@ -173,18 +176,101 @@ void testSpatialMath()
     assert(spatial::relativeDelaySeconds(1000.0f, 0.0f) <= spatial::kMaximumRelativeDelaySeconds);
 }
 
+void testDynamicSceneAndRoutePlanPublication()
+{
+    auto& registry = clubcraft::SessionRegistry::instance();
+    registry.resetForTests();
+
+    const auto publisher = registry.registerClubPublisher("dynamic-session", 101);
+    assert(publisher.authoritative);
+    assert(!publisher.conflict);
+
+    const auto sourceResult = registry.registerSource({
+        .sourceId = "kick",
+        .sessionId = "dynamic-session",
+        .displayName = "Kick",
+        .heartbeat = 1,
+        .runtimeInstanceToken = 201,
+    });
+    assert(sourceResult.accepted());
+
+    clubcraft::RealtimeSceneSnapshot scene;
+    scene.revision = 55;
+    scene.activeSpeakerCount = 1;
+    scene.speakers[0] = {
+        .active = true,
+        .generation = 3,
+        .type = clubcraft::SpeakerType::sub,
+        .linearGain = 0.5f,
+        .position = { -4.0f, 3.0f },
+    };
+
+    assert(registry.publishRealtimeScene("dynamic-session", 101, scene));
+    const auto sceneHandle = registry.acquireDynamicSession("dynamic-session");
+    const auto publishedScene = clubcraft::SessionRegistry::readRealtimeScene(sceneHandle);
+    assert(publishedScene.has_value());
+    assert(publishedScene->revision == 55);
+    assert(publishedScene->speakers[0].generation == 3);
+    assertNear(publishedScene->speakers[0].linearGain, 0.5f);
+
+    clubcraft::SourceRoutePlan plan;
+    plan.revision = 55;
+    plan.routeCount = 1;
+    plan.routes[0] = {
+        .enabled = true,
+        .speakerSlot = 0,
+        .speakerGeneration = 3,
+        .mode = clubcraft::RouteMode::full,
+        .inputMode = clubcraft::InputChannelMode::sumMono,
+        .linearGain = 1.0f,
+    };
+
+    assert(registry.publishSourceRoutePlan("dynamic-session", 101, "kick", plan));
+    const auto routeHandle = registry.acquireSourceRoute("dynamic-session", "kick");
+    const auto publishedPlan = clubcraft::SessionRegistry::readSourceRoutePlan(routeHandle);
+    assert(publishedPlan.has_value());
+    assert(publishedPlan->revision == 55);
+    assert(publishedPlan->routeCount == 1);
+    assert(publishedPlan->routes[0].speakerGeneration == 3);
+
+    const auto duplicateSource = registry.registerSource({
+        .sourceId = "kick",
+        .sessionId = "dynamic-session",
+        .displayName = "Duplicated Kick",
+        .heartbeat = 2,
+        .runtimeInstanceToken = 202,
+    });
+    assert(duplicateSource.requiresRekey());
+
+    const auto otherSessionSource = registry.registerSource({
+        .sourceId = "kick",
+        .sessionId = "another-session",
+        .displayName = "Kick in another Session",
+        .heartbeat = 3,
+        .runtimeInstanceToken = 203,
+    });
+    assert(otherSessionSource.accepted());
+
+    const auto conflictingClub = registry.registerClubPublisher("dynamic-session", 102);
+    assert(!conflictingClub.authoritative);
+    assert(conflictingClub.conflict);
+    assert(registry.hasClubConflict("dynamic-session"));
+    assert(!registry.publishRealtimeScene("dynamic-session", 102, scene));
+}
+
 void testSourceLifecycle()
 {
     auto& registry = clubcraft::SessionRegistry::instance();
     registry.resetForTests();
 
-    registry.registerSource({
+    const auto sourceRegistration = registry.registerSource({
         .sourceId = "kick-source",
         .sessionId = "test-club",
         .displayName = "Kick",
         .position = { 2.0f, -3.0f },
         .heartbeat = 42,
     });
+    assert(sourceRegistration.accepted());
 
     const auto source = registry.getSource("kick-source");
     assert(source.has_value());
@@ -205,7 +291,10 @@ int main()
     testSpeakerCharacterResponses();
     testFullSignalNormalization();
     testSpatialMath();
+    testDynamicSceneAndRoutePlanPublication();
     testSourceLifecycle();
+    runSceneCompilerTests();
+    runSourceRouteRendererTests();
     std::cout << "ClubCraftCoreTests passed\n";
     return 0;
 }
