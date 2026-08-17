@@ -1,0 +1,44 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base-debug",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CLUBCRAFT_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "macos-intel-debug",
+      "displayName": "macOS Intel Debug",
+      "description": "Builds an x86_64 VST3 suitable for local testing on Intel Macs.",
+      "inherits": "base-debug",
+      "binaryDir": "${sourceDir}/build-macos-intel-debug",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "x86_64"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "macos-intel-debug",
+      "configurePreset": "macos-intel-debug",
+      "targets": [
+        "ClubCraft_VST3",
+        "ClubCraftCoreTests"
+      ],
+      "jobs": 2
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "macos-intel-debug",
+      "configurePreset": "macos-intel-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

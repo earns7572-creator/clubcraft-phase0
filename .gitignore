@@ -1,0 +1,25 @@
+# JUCE is a pinned third-party dependency; fetch it locally as documented.
+JUCE/
+
+# CMake and Ninja build trees
+build/
+build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Testing/
+
+# Release artifacts and logs
+dist/
+*.dSYM/
+
+# IDE and operating-system metadata
+.DS_Store
+.idea/
+.vscode/
+
+# Local signing/notarization material
+*.p12
+*.mobileprovision
+*.xcarchive
