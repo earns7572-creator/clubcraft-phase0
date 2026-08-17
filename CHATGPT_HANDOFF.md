@@ -1,302 +1,600 @@
-# Club Craft — ChatGPT開発引き継ぎ資料
+# Club Craft — AI開発引き継ぎ資料（製品仕様の正本）
 
-**対象リポジトリ:** `https://github.com/earns7572-creator/clubcraft-phase0`  
-**基準branch:** `main`  
-**基準commit:** `6eaa05e185fb291ea8e9b2989868e25bbdf29279`  
-**現行バージョン:** `0.5.0`  
-**作業言語:** 日本語。依頼者は初心者なので、専門用語を使う場合は先に短く説明すること。
+**Repository:** `https://github.com/earns7572-creator/clubcraft-phase0`
 
-> **最重要の製品概念:** Club Craftは、通常のEQノブを中心にしたミキシング／マスタリングではなく、仮想クラブのSpeaker配置・Speaker Type・Speaker出力・Listener（観客）位置によってトーンと空間を作るDAWプラグインである。
+**Branch:** `main`
 
----
+**現行実装:** 0.5.0系プロトタイプ
+**重要:** この文書は、以前の「4 Speaker固定・Stereo空間シミュレーター中心」のロードマップを置き換える。今後の開発はこの文書を正本とする。
 
-## 1. 今すぐ守るべき正しい空間モデル
-
-以前はSOURCE（各DAW TrackのClub Craft）がX/Y位置を持つ実装だったが、これは製品要件から外れているため撤回済みである。**今後、SOURCE位置のUIやパラメータを復活させてはいけない。**
-
-| 対象 | 正しい役割 | 操作できる場所 |
-|---|---|---|
-| SOURCE | DAW Trackの音をクラブの固定ステージ原点から発生させる。位置は常に `(0, 0)`。 | 操作不可 |
-| CLUB | 全SOURCEに共通するSpeaker、Listener、Speaker Type、Masterを管理する。 | CLUBインスタンスのみ |
-| Speaker | `FRONT L`、`FRONT R`、`REAR L`、`REAR R`。各Speakerは独立したX/Y位置、Type、Levelを持つ。 | CLUBインスタンスのみ |
-| Listener / Audience | 観客がクラブ内のどこで聴くか。X/Y位置を持つ。 | CLUBインスタンスのみ |
-
-### 座標と現行DSP
-
-X軸は左（負）から右（正）、Y軸は後方（負）から前方（正）である。SOURCEは固定原点 `(0, 0)`。各Speakerについて、`SOURCE → Speaker` と `Speaker → Listener` の合計経路長を求める。
-
-1. 合計経路長に応じた相対Levelを計算する。
-2. 最短経路との差から最大60 msの相対delayを計算する。
-3. 経路が長いほどGeneric Responseの高域を暗くする。
-4. SpeakerとListenerの相対X位置を、Speaker→Listener距離で正規化してconstant-power stereo panを計算する。
-5. Speaker Type CharacterとGeneric Responseを通し、Stereo L/Rへ合算する。
-
-普通のStereo出力だけでは、Rearがヘッドホン上で「完全に真後ろ」へ定位するわけではない。現状のFRONT/REAR差は、距離、delay、高域減衰、panの差として表現される。**HRTF、反射、残響は未実装であり、将来のPhaseで足す。**
+> **最重要の製品概念:** Club Craftは、仮想クラブのサウンドシステムそのものを音楽制作・ミキシング・マスタリングのインターフェースにするDAWプラグインである。
+>
+> 通常のEQで周波数を直接ブースト／カットするのではなく、Speakerの種類・数・配置・出力バランスと、SOURCEから各Speakerへのルーティングを操作した結果として、最終的な音色・空間・マスターが決まる。
 
 ---
 
-## 2. プロジェクトの技術構成
+## 1. 製品の中心思想
 
-| 項目 | 内容 |
-|---|---|
-| 言語 | C++20 |
-| Framework | JUCE 9.0.1 |
-| Plugin形式 | VST3。macOSでは対応時にAUも生成する |
-| モジュール | `Club Craft.vst3` の**単一バイナリ**。各インスタンスでSOURCE / CLUB roleを選択する |
-| Build | CMake 3.22以上 + Ninja |
-| State | `juce::AudioProcessorValueTreeState` (APVTS)、現行schema version 6 |
-| Mac Release | `./build-release.sh`。clean build、Universal Binary、VST3、AU、CTest、`dist/` packagingを行う |
-| GitHub | private repository。`main`へ小さく検証済みcommitをpushする |
+Club Craftは「PA設計ソフト」でも「4 Speaker固定のStereo空間シミュレーター」でもない。
 
-### 単一VST3バイナリが必須である理由
+中心は次の4点。
 
-SOURCEとCLUBの共有Sceneは、同一ホストプロセス内の静的Registryを使う。SOURCE用とCLUB用を別VST3バイナリにすると、ホストが別アドレス空間へロードする可能性があり、共有状態が壊れる。**SOURCEとCLUBを別プラグインへ分離しないこと。**
+1. **仮想クラブを作る**
+   - Speakerを自由に追加・削除・配置する
+   - `SUB / WOOFER / FULL RANGE / MID / HIGH / CUSTOM` を選ぶ
+   - 同じ種類を何台置いてもよい
+   - 例: SUBを5台置いて極端な低域を作ることも許可する
 
-### Realtime Safetyの絶対条件
+2. **DAWの各SOURCEを、好きなSpeakerへ直接つなぐ**
+   - 1 SOURCE → 複数Speaker
+   - 複数SOURCE → 同じSpeaker
+   - 接続数は固定しない
+   - UIではSOURCEをSpeakerへドラッグして接続する
 
-`processBlock()` はaudio threadで実行される。次を絶対に守ること。
+3. **FULL SIGNAL / BAND ROUTING**
+   - 例: `Kick Full Signal → FULL L/R`
+   - 同時に `Kick 20–100 Hz → SUB 1/2`
+   - 周波数分割は「EQの代わり」ではなく、Speakerへの送り方として扱う
 
-| 禁止事項 | 理由 |
-|---|---|
-| lock / mutex取得 | 音切れの原因になる |
-| メモリ確保・解放 | realtime安全ではない |
-| `std::vector`のresize / push_back | メモリ確保を伴う可能性がある |
-| 待機、sleep、I/O、ログ出力 | audio threadを止める |
-| `std::atomic<std::shared_ptr<T>>` | 旧Intel macOS libc++互換性を失う |
-
-`SessionRegistry` は、control threadではmutexを使うが、audio threadではprimitive atomicsだけを読む。複数値の整合性はseqlockで保つ。DSP用のdelay line、filter、scratch領域は `prepareToPlay()` で確保し、`processBlock()` 中に確保しない。
+4. **Speaker Balanceによる“逆EQ”**
+   - EQカーブを直接編集しない
+   - Speakerの種類・台数・Levelの結果として最終周波数バランスが変わる
+   - RTA / Spectrumは編集画面ではなく「結果を見る画面」
 
 ---
 
-## 3. 現行ファイルの役割
+## 2. 現行0.5.0の扱い
 
-| ファイル | 役割 |
-|---|---|
-| `CMakeLists.txt` | JUCE target、plugin format、tests、version `0.5.0` |
-| `build-release.sh` | macOS Universal Releaseの自動化。できるだけ変更しない |
-| `src/common/SessionRegistry.h/.cpp` | CLUB→SOURCEのScene公開。Speaker Type、Speaker X/Y、Listener X/Y、Levelをprimitive atomicsで共有 |
-| `src/common/SpatialMath.h` | 距離、relative gain、relative delay、constant-power pan、Speaker/Listener相対pan |
-| `src/common/SpeakerType.h` | `SUB`、`WOOFER`、`FULL RANGE`、`MID`、`HIGH` のenumとparameter変換 |
-| `src/common/SpeakerCharacterResponse.h` | Speaker Typeごとの広い帯域Character |
-| `src/common/GenericSpeakerResponse.h` | Generic Response（距離で暗くなるlow-pass） |
-| `src/common/StereoSpatialRenderer.h` | 固定SOURCE、可動Speaker、可動ListenerをStereo L/Rへ合成するDSP |
-| `src/club/PluginProcessor.h/.cpp` | APVTS parameters、role管理、Scene publish、audio callback |
-| `src/club/PluginEditor.h/.cpp` | 暖色グレー基調のminimal UI。CLUBではListenerと個別Speakerを操作する |
-| `tests/SessionRegistryTests.cpp` | assertベースの軽量CTest。Scene公開、Type、Character、pan、delayを検証 |
+現行コードには以下がある。
 
----
+- C++20 / JUCE 9.0.1
+- 単一 `Club Craft.vst3`
+- 各インスタンスでSOURCE / CLUB role切替
+- `SessionRegistry`
+- APVTS state
+- realtime-safeなprimitive atomics + seqlock
+- Generic Speaker Type
+- Speaker Level
+- Speaker位置 / Listener位置
+- StereoSpatialRenderer
 
-## 4. 実装済みの履歴
+### 残すもの
 
-| 段階 | commit | 実装内容 | 状態 |
-|---|---|---|---|
-| Phase 0 | 初期履歴 | VST3基盤、SOURCE / CLUB role、Session Registry、state save/load、pass-through | 完了 |
-| Phase 1 | `0051694` | 4 Speaker Full Signal、個別Level、Generic Response、正規化 | 完了 |
-| Phase 2 | `9a81310` | 初期の平面Spatial処理。後に操作モデルを修正 | 一部置換済み |
-| Phase 3 | `a847c64` | Speaker Type (`SUB/WOOFER/FULL RANGE/MID/HIGH`) とCharacter | 完了 |
-| Fixed Source update | `6eaa05e` | SOURCE固定、各Speaker X/Y、Listener X/Y、Listener相対pan | 現行基準 |
+以下は基盤として維持する。
 
-### 現行Speaker Type Character
+- single-binary SOURCE / CLUB architecture
+- SessionRegistryの考え方
+- realtime threadでlock / allocation / I/O / waitをしない方針
+- APVTSによる状態保存
+- macOS Universal build
+- Speaker Type enumと基本DSP部品
+- テスト基盤
 
-| Type | 役割の目安 | 現行filter目安 |
-|---|---|---|
-| `SUB` | 最低域の重心 | 28 Hz high-pass、110 Hz low-pass |
-| `WOOFER` | Kick / Bassの胴鳴り | 55 Hz high-pass、420 Hz low-pass |
-| `FULL RANGE` | 旧Phase互換の基準 | Type固有filterなし |
-| `MID` | Vocal / Snare / Synthの中心 | 220 Hz high-pass、4.6 kHz low-pass |
-| `HIGH` | Hats / Air / 輪郭 | 2.4 kHz high-pass |
+### 「完成形の制約」としては撤回するもの
 
-これらは市販Speakerの測定モデルではない。実在機材の再現と主張しないこと。
+現行の以下は**プロトタイプ上の都合であり、製品要件ではない**。
 
----
+- Speakerが4台固定
+- `FRONT L / FRONT R / REAR L / REAR R` 固定
+- SOURCEが必ず4 Speaker全部を通る
+- `StereoSpatialRenderer` が最終アーキテクチャ
+- Stereo L/Rのみが主出力
+- SOURCE位置 `(0,0)` を中心に全Speakerへ音を放射するモデル
+- Spread / Depthで4台をまとめて動かすモデル
+- 4 Speaker固定を守ること
+- 8ch / Binauralを1.0以降へ後回しにすること
 
-## 5. 現在の完了事項と未解決事項
-
-### 実装・検証済み
-
-- VST3 Debug build成功（Linux）。
-- CTest `ClubCraftCoreTests` 合格。
-- Version 0.5.0のVST3 `moduleinfo.json` 生成確認。
-- バイナリに `LISTENER / AUDIENCE POSITION` と `INDIVIDUAL SPEAKER PLACEMENT & VOICES` が含まれることを確認。
-- macOS Intelで `build-release.sh` によるUniversal Binary `x86_64 / arm64` VST3/AU生成を過去に確認。
-- Phase 0.5.0のmacOS Live実機試用は、次回必ず行うこと。
-
-### 現在の弱点
-
-| 弱点 | 正しい対応方針 |
-|---|---|
-| Speaker位置とListener位置が数値sliderのみ | 次に2Dフロアビューと直接ドラッグを実装する |
-| FRONT / REARの前後感が弱い | HRTFを急がず、まず初期反射・crossfeed・距離に連動する空間差を検討する |
-| Speaker配置の結果が見えない | Speakerごとの寄与メーター、経路距離、delay、panを可視化する |
-| Speaker Typeは固定Character | 将来、強さ（Character Amount）や安全なCrossover設定を追加する |
-| A/B・bypass・solo・muteがない | ミックス判断のためのworkflow機能を追加する |
-| Presetがない | venue templateとユーザーScene保存を設計する |
-| 多ホストQAが不足 | Ableton Live Intel / Apple Silicon、Logic AU、Reaperなどで検証する |
-| 署名・notarization未設定 | Release直前まで必須にせず、環境変数対応の既存scriptを維持する |
+これらを今後の設計判断の前提にしない。
 
 ---
 
-## 6. 完成版（1.0）までの必須ロードマップ
+## 3. 正しいSOURCE / CLUBモデル
 
-ChatGPTは、原則として一度に1 Phaseだけ実装すること。各Phaseの最後に、tests、VST3 build、資料、Git commit/pushを完了し、ユーザーにMacで試すタイミングを確認する。
+### SOURCE
 
-### 現在地点 — Version 0.5.0: Correct Spatial Ownership
+各DAW Trackに挿す軽量インスタンス。
 
-固定SOURCE、個別Speaker X/Y、Listener X/Yへ修正済み。次の開発はここを壊さずに始める。
+持つべき情報:
 
-### Phase 4 — Version 0.6.0: 2D Club Floor View
+- Source ID
+- Display Name
+- Icon
+- Club Viewでの表示/非表示
+- Routing definitions
+- 必要ならSource Group
 
-**目的:** 数字のsliderではなく、クラブ平面図でSpeakerとListenerを理解・操作できるようにする。
+SOURCE自体の「クラブ内の物理位置」を主操作にはしない。
 
-| 実装 | 完了条件 |
-|---|---|
-| CLUB UIに2Dフロアビューを追加 | SOURCEは固定ステージマーカー、4 SpeakerとListenerが表示される |
-| Speaker / Listenerのドラッグ | ドラッグが既存APVTS X/Y parameterを更新し、host automation / state saveと整合する |
-| 軸・前後・左右の表示 | ユーザーがY+ = FRONT、Y- = REARを迷わない |
-| 数値sliderとの双方向同期 | drag後にもX/Y値が見え、数値変更後にも図が動く |
-| SOURCEはドラッグ不可 | 固定SOURCE要件をUIで破れない |
+重要なのは**SOURCEがどのSpeakerへ送られているか**。
 
-**検証:** SOURCEが固定であること、SpeakerとListenerのdragがstate save/reload後に復元すること、CLUB以外では図がread-onlyまたは非操作であること。
+### CLUB
 
-### Phase 5 — Version 0.7.0: Understandable Spatial Feedback
+1つのメイン画面で以下を扱う。
 
-**目的:** Speaker / Listenerを動かした結果を、耳と表示の両方で理解できるようにする。
+- 全SOURCE一覧
+- Speaker追加 / 削除
+- Speaker Type
+- Speaker位置
+- Speaker Level
+- SOURCE → Speaker routing
+- FULL SIGNAL / BAND
+- Listener位置
+- RTA
+- Output mode
+- Binaural preview
 
-| 実装 | 完了条件 |
-|---|---|
-| Speaker寄与メーター | 各Speakerの最終経路Levelを表示する。audio threadから安全にmeter値を渡す |
-| Path inspector | 各Speakerの距離、relative delay、pan、toneをcontrol threadで算出・表示する |
-| Solo / Mute | Speakerごとに聴き比べでき、状態保存される |
-| Safe A/B / global bypass | 変更前後を安全に比較できる |
-
-**注意:** UI meter更新はTimerで行い、audio threadでlockやallocationを行わない。A/Bはparameter stateのcopyやatomic swapを慎重に設計する。
-
-### Phase 6 — Version 0.8.0: Perceptual Front / Rear Cues
-
-**目的:** 固定SOURCE / Speaker / Listenerモデルを維持したまま、FRONT / REARの違いをより聞き取りやすくする。
-
-| 優先実装 | 内容 |
-|---|---|
-| Speaker directivity | Speakerの向き／広がりを簡易モデル化し、Listener角度に応じて高域とLevelを変える |
-| 初期反射 | 少数の短い反射を追加し、前後・距離の差を補う。過度な残響にしない |
-| stereo crossfeed | 近接するSpeakerの左右漏れを控えめに追加し、耳に不自然なhard panを避ける |
-| HRTF research mode | 必要ならオプション実験として追加するが、個人化HRTFを完成条件にしない |
-
-**完了条件:** 対称ではない配置とListener移動で、FRONT / REARの差を小型モニターとヘッドホンの両方で理解しやすい。CPU、latency、click/noiseを測定する。
-
-### Phase 7 — Version 0.9.0: Club Mixing Workflow
-
-**目的:** 実際の制作で使える操作と安全性を追加する。
-
-| 実装 | 完了条件 |
-|---|---|
-| Venue template | Small club、wide room、front-heavy、rear-heavyなどの初期Scene |
-| Speaker Type template | Sub / Woofer / Full Range / Mid / Highの推奨組み合わせ |
-| 入出力meterとclip警告 | MasterとSpeaker経路を監視し、過大入力を分かりやすく表示 |
-| Output safety | 任意の安全出力trim / soft clip / limiter。デフォルトで音を破壊しない |
-| Session管理 | Session IDを安全に確認・変更でき、複数Club Sceneが混線しない |
-| 状態migration | 旧Phaseのstateを読み、可能な範囲で新stateへ安全に移す |
-
-**禁止:** 便利だからと通常の多バンドEQ画面を主インターフェースにしない。Club Craftの中心はSpeakerとListenerである。
-
-### Phase 8 — Version 1.0.0: Production Hardening and Release
-
-**目的:** 配布可能な安定版へ仕上げる。
-
-| 領域 | 必須項目 |
-|---|---|
-| DSP | sample-rate 44.1/48/88.2/96 kHz、block size 32〜2048、offline render、silence、reset、automationを検証 |
-| Host | Ableton Live Intel / Apple Silicon、Logic Pro AU、Reaperなどでロード・保存・再読込・bounceを検証 |
-| Format | Universal VST3、必要ならAU。Bundle manifest versionを確認 |
-| UI | 低解像度／高解像度、resize、DAWテーマ、keyboard focus、parameter名を確認 |
-| Release | `build-release.sh`、CTest、dist manifest、SHA、署名／notarizationは任意環境変数で実行 |
-| Docs | 概念、Quick Start、Speaker / Listener用語、既知の制約、troubleshooting、Mac更新手順 |
-
-**1.0の最小完了条件:** 主要DAWで安定してロードでき、Sceneが保存・復元し、Clubの操作によって意図した音色・位置差を作れ、audio thread安全性とCPU負荷の要件を満たすこと。
-
-### 1.0以降の任意拡張
-
-- 個人化HRTF、head tracking、binaural mode。
-- 高度なroom model、壁材、遮蔽、残響。
-- 8 Speaker以上のlayoutとsurround / immersive output。
-- 実機Speaker測定に基づくCharacter pack。
-- 複数人共有のクラブSceneや外部controller連携。
-
-これらを1.0の前提にして、現行の操作モデルを複雑にしないこと。
+ユーザー体験としては「複数のプラグインを触る」のではなく、CLUB画面から1つのVirtual Clubを操作する。
 
 ---
 
-## 7. 各Phaseで必ず行う開発手順
+## 4. Speaker Sceneモデル
 
-1. `main`がcleanであることを確認する。
-2. 変更前に、今Phaseの目的・対象外・parameter追加／削除・state migration方針を短い設計資料へ書く。
-3. 小さく実装する。既存のSOURCE固定、single-binary、Realtime安全性を破らない。
-4. `tests/SessionRegistryTests.cpp` に該当する自動テストを追加する。必要に応じてテストtargetを拡張する。
-5. Linuxで次を実行する。
+V1設計ではSpeakerを固定4台のarrayとしてハードコードしない。
 
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCLUBCRAFT_BUILD_TESTS=ON
-cmake --build build --target ClubCraftCoreTests ClubCraft_VST3 --parallel 1
-ctest --test-dir build --output-on-failure
-```
+### 必要なSpeaker属性
 
-6. VST3 bundleの `Contents/Resources/moduleinfo.json` とUI文字列を検査する。
-7. READMEとIntel Mac試用資料を更新する。
-8. `git status`、`git diff --check`を確認する。
-9. 一つの意味のあるcommitを作り、`main`へpushする。
-10. ユーザーへ、**何が変わったか、何がまだできないか、Macで何を聞けばよいか**を初心者向けに説明する。
+- Stable Speaker ID
+- Name
+- Type
+  - SUB
+  - WOOFER
+  - FULL RANGE
+  - MID
+  - HIGH
+  - CUSTOM
+- Position
+  - X
+  - Y
+  - 将来Z
+- Output Level
+- Output channel assignment
+- Enabled / Mute / Solo
+- Frequency response profile
+
+### 台数
+
+完成形では可変台数。
+
+初期実装ではrealtime安全性のため、例えば `MAX_SPEAKERS = 16` の固定容量slot方式でもよい。
+UI上では追加/削除可能に見せ、audio threadでは事前確保されたslotだけを使う。
+
+**4台固定構造をそのまま拡張し続けないこと。**
 
 ---
 
-## 8. macOS IntelでのReleaseと安全な更新
+## 5. Routingモデル
 
-### Release作成
+これはClub Craftの最重要部分。
 
-```bash
-cd ~/Developer/ClubCraftPhase0
-git pull origin main
-./build-release.sh
-```
-
-成功時のReleaseは次の形式で作られる。
+### 例
 
 ```text
-dist/ClubCraft-<VERSION>-macos-universal
+KICK
+├ Full Signal → FULL L
+├ Full Signal → FULL R
+├ 20–100 Hz → SUB 1
+└ 20–100 Hz → SUB 2
+
+HAT
+├ Full Signal → HIGH L
+└ Full Signal → HIGH R
 ```
 
-### VST3更新の安全な原則
+### Routeに必要な情報
 
-1. Ableton Liveを**完全に終了**する。
-2. Release側の `Club Craft.vst3` が存在することを先に確認する。
-3. 既存VST3を日時付きでバックアップする。
-4. 新VST3を `~/Library/Audio/Plug-Ins/VST3/Club Craft.vst3` へコピーする。
-5. `codesign --force --deep --sign -` でad-hoc署名する。
-6. Liveを完全に起動し直し、必要ならPreferencesのPlug-insからRescanする。
-7. `.vstpreset` ではなく、BrowserのPlug-insにある**プラグイン本体**を新しいTrackへ挿して確認する。
+- Route ID
+- Source ID
+- Speaker ID
+- Mode
+  - FULL
+  - BAND
+- Band Low Hz
+- Band High Hz
+- Route enabled
+- 必要ならRoute gain（V1では非表示でもよい）
 
-`codesign`後はMac binaryのSHAがRelease元と異なることがある。これは署名情報が書き込まれるため正常である。SHA一致だけで失敗と判断しない。
+### UI
+
+基本操作:
+
+1. SOURCEを掴む
+2. Speakerへドラッグ
+3. 接続
+4. 接続をクリックすると `FULL / BAND` を選べる
+
+大量の曲線ケーブルを常時表示しない。
+
+Routing lineは:
+
+- straight
+- orthogonal
+- thin
+- selected / hover時のみ強調
+
+を基本とする。
 
 ---
 
-## 9. 既存資料
+## 6. Speaker Frequency Response
 
-| 資料 | 用途 |
-|---|---|
-| `README.md` | 概要、Phase 1〜3、Fixed Sourceの説明 |
-| `PHASE2_DESIGN.md` | 旧Planar Spatialisationの設計。SOURCE位置は現行仕様では使わない |
-| `PHASE2_TRYOUT.md` | 旧試用手順。Source位置部分は現行仕様に適用しない |
-| `PHASE3_DESIGN.md` | Speaker Type Characterの設計 |
-| `PHASE3_TRYOUT.md` | Speaker Type試用手順 |
-| `FIXED_SOURCE_LAYOUT_DESIGN.md` | **現行空間モデルの正しい設計資料** |
-| `FIXED_SOURCE_LAYOUT_TRYOUT.md` | **Version 0.5.0のMac / Live試用手順** |
+Speaker Typeは単純な理想HPF/LPFだけではなく、自然なCharacter Curveを持つ方向へ進める。
+
+V1ではGeneric Profileでよい。
+
+例:
+
+- SUB
+- WOOFER
+- FULL RANGE
+- MID
+- HIGH
+
+将来:
+
+- NEXO
+- Funktion-One
+- JBL
+- Martin Audio
+
+などの実機Profileを追加できる構造にする。
+
+実機Profileはメーカー公称値や測定データのライセンス・商標を確認してから実装する。
+
+`Generic Response Tone` のような、通常EQに近いグローバルTone knobは製品の中心にしない。必要性がなければ削除候補。
 
 ---
 
-## 10. ChatGPTへの実装時の姿勢
+## 7. System Balance = Reverse EQ
 
-- 不明な要件は、実装前に短い質問で確認する。ただし、現在明確な固定SOURCE要件は質問し直さない。
-- 初心者へ案内する場合、Terminalコマンドはコピー・貼り付け可能な短い単位にし、コメント行を含めない。過去にzshで `#` 行がコマンドとして実行され、作業が止まった。
-- 「立体的」と言う場合、Stereo simulation、HRTF、room reflectionのどこまで実装しているかを正直に区別する。
-- 既存の動作を壊す変更では、state migrationとrollback方法を先に設計する。
-- macOSで実機確認していないことを、確認済みと表現しない。
-- リポジトリへpushする前に、必ずbuildとtestsを通す。
+Club Craftの特徴。
+
+ユーザーは通常のEQ pointを動かさない。
+
+例:
+
+- SUB Speaker群を上げる
+- FULL RANGEを下げる
+- HIGHを少し下げる
+
+その結果としてMasterの周波数バランスが変わる。
+
+### RTA
+
+RTA / Spectrum Analyzerをリアルタイム表示する。
+
+目的:
+
+- 今のSpeaker構成がどんな音になっているか見る
+- SUBを増やしすぎた時に低域過多を確認する
+- クリエイティブな極端設定を禁止しない
+
+RTAは**編集用EQではない**。
+
+自動補正もしない。
+
+必要なら軽いWarningだけ出す。
+
+---
+
+## 8. Listener
+
+ListenerはVirtual Club内で移動できる。
+
+Listenerを動かした時に、ヘッドホン / Stereo preview上で聴こえ方が変わる。
+
+V1で優先する要素:
+
+- Speaker position
+- Listener position
+- Direction
+- Distance
+- Speaker response
+- Binaural rendering
+
+高度な壁反射・残響・物理音響は後回し。
+
+ユーザーがPA delayを手動で触る機能は中心にしない。
+
+---
+
+## 9. Output
+
+1つのClub Sceneから最終的に以下を扱う。
+
+- BINAURAL 2ch
+- STEREO 2ch
+- QUAD 4ch
+- OCTA 8ch
+
+**4ch / 8chは完成版の中心機能であり、1.0以降の任意拡張ではない。**
+
+DAW/formatごとに入出力制約があるため、実装前にJUCE / VST3 / AU / Ableton Liveの対応を検証する。
+
+必要なら「Preview engine」と「Discrete multichannel output」を分離して設計する。
+
+---
+
+## 10. Binaural
+
+通常の2ch headphoneでVirtual Clubを確認できることは主要機能。
+
+目標:
+
+- Left / Right
+- Front / Rear
+- Height（将来Z導入後）
+- Distance
+
+を知覚可能にする。
+
+HRTFの方式は実装前に比較・検証する。
+
+現時点の簡易StereoSpatialRendererを「Binaural完成」とみなさない。
+
+---
+
+## 11. UI / UX
+
+添付した最終UIモックアップの方向を基準にする。
+
+### Design direction
+
+- light / medium gray
+- airy
+- minimal
+- tactile
+- sophisticated
+- 箱庭 / 建築模型 / 3Dプリンタ模型の感覚
+- Speakerは無彩色の立体フィギュア感
+- Accent colorはSOURCE識別など必要最小限
+- Apple / macOSの余白感
+- Abletonの機能的整理
+- Teenage Engineeringのプロダクト的遊び心
+- Blenderの模型/viewport感
+
+ただし特定製品のUIをコピーしない。
+
+### 避ける
+
+- Neon
+- Cyberpunk
+- AI dashboard感
+- SaaS dashboard感
+- ゲーミングUI
+- excessive gradients
+- glowing particles
+- 派手すぎるSpectrum
+- toy-like多色UI
+- 大量の数値
+- 大量の枠線
+- うねうねしたRouting cable
+
+### Tabs
+
+すべてを1画面へ詰め込まない。
+
+候補:
+
+- CLUB
+- SOURCES
+- SPEAKERS
+- MIX / SYSTEM
+- OUTPUT
+
+### CLUB View
+
+中心画面。
+
+- 箱庭的Virtual Club
+- Speaker
+- Listener
+- Visible Sources
+- Speaker activity
+- Speaker Level
+- Small RTA
+
+---
+
+## 12. Source Management
+
+100 Track規模でも破綻しない。
+
+登録SOURCE全部をClub Viewへ表示しない。
+
+各Sourceに:
+
+- Show in Club
+- Hide from Club
+
+を持つ。
+
+非表示でもRouting / audio processingは維持。
+
+将来:
+
+- DRUMS
+- BASS
+- SYNTH
+- VOCAL
+- FX
+
+などGroup化。
+
+SOURCEごとにName / Iconを選択できる。
+
+---
+
+## 13. Sound Visualization
+
+Speakerが鳴っていることをClub Viewで分かるようにする。
+
+避ける:
+
+- neon glow
+- particle cloud
+- sci-fi wave
+
+候補:
+
+- 小さなspeaker cone movement
+- subtle flat-color wave
+- simple ring
+- restrained surface deformation
+- speaker activity meter
+
+色は「音の情報」と「SOURCE識別」に限定して使う。
+
+---
+
+## 14. Realtime Safety
+
+既存方針を維持。
+
+`processBlock()` では:
+
+- mutex禁止
+- allocation禁止
+- container resize / push_back禁止
+- I/O禁止
+- sleep / wait禁止
+- logging禁止
+
+可変Speaker / Routeを実現する場合は、control threadでSceneを構築し、audio threadへは固定容量のimmutable / atomic-friendly snapshotを渡す。
+
+例:
+
+- `MAX_SPEAKERS = 16`
+- `MAX_ROUTES = 128`
+
+など、V1では上限を設けてもよい。
+
+---
+
+## 15. 開発の次の順序
+
+現行0.5.0のPhase 4ロードマップは廃止する。
+
+### Re-alignment Phase — 0.6.0
+
+**コードを大きく追加する前にアーキテクチャを修正する。**
+
+目的:
+
+- 固定4Speaker構造を完成形の前提から外す
+- Scene modelを可変Speaker / Route前提へ設計
+- SOURCE→Speaker routingを中心に置く
+- Stereo previewとDiscrete outputを分離して考える
+
+まず設計資料を作り、コード変更前にレビューする。
+
+### 0.7.0 — Dynamic Speaker Scene
+
+- Speaker add/remove
+- Speaker IDs
+- Generic types
+- individual X/Y
+- individual levels
+- Pair add
+- venue presets
+- Top View UI
+
+### 0.8.0 — Source Routing
+
+- SOURCE registration
+- source list
+- show/hide
+- source icon/name
+- drag SOURCE → Speaker
+- one-to-many routes
+- Full Signal routing
+
+### 0.9.0 — Band Routing + System Balance
+
+- FULL / BAND route
+- band low/high
+- Speaker response
+- RTA
+- group + individual speaker level
+- Speaker activity visualization
+
+### 0.10.0 — Listener + Binaural Preview
+
+- draggable Listener
+- stereo preview
+- real binaural/HRTF research and implementation
+- front/rear/distance
+- Z/height modelを入れるならここで設計
+
+### 0.11.0 — 4ch / 8ch Output
+
+- QUAD / OCTA bus architecture
+- output channel assignment
+- DAW compatibility tests
+- export/render workflow
+
+### 0.12.0 — Workflow / Polish
+
+- tabs
+- presets
+- source groups
+- solo/mute
+- A/B
+- clip warning
+- state migration
+- UI refinement
+
+### 1.0.0 — Production Hardening
+
+- macOS Intel / Apple Silicon
+- VST3 / AU
+- Ableton / Logic / Reaper
+- sample rates
+- block sizes
+- offline render
+- automation
+- save/restore
+- CPU
+- release build
+- docs
+- signing / notarization where required
+
+---
+
+## 16. 次にAIが最初にすること
+
+**まだ実装を始めない。**
+
+最初に:
+
+1. 現行コードを読み、0.5.0から残せる基盤を列挙
+2. 固定4Speaker / StereoSpatialRenderer依存箇所を列挙
+3. Dynamic Speaker + Route Sceneのデータ構造を提案
+4. realtime-safe snapshot方式を提案
+5. SOURCE→Speaker audio routingをどう実装するか提案
+6. Stereo/Binaural previewと4/8ch discrete outputの責務分離を提案
+7. APVTS / state migration方針を提案
+8. V1上限（例: 16 speakers / 128 routes）を提案
+9. 変更対象ファイル一覧を提示
+10. その設計を承認されるまでコードを書かない
+
+---
+
+## 17. 絶対に避けること
+
+- 4 Speaker固定を製品要件として維持する
+- SOURCEを必ず全Speakerへ送る
+- StereoSpatialRendererだけを完成形として発展させる
+- 4ch / 8chを1.0以降へ追いやる
+- 普通のEQ UIを中心にする
+- Generic Tone knobを中心にする
+- PA delay調整ソフトへ寄せる
+- 現実のクラブを精密再現すること自体を目的にする
+- SOURCE / CLUBを別binaryに分ける
+- realtime thread安全性を破る
+- UIをネオン / SF / AI dashboard化する
+
+---
+
+## 18. 一文で表す完成形
+
+> **仮想クラブに好きなSpeakerを置き、DAWの各音をSpeakerへ直接つなぎ、Speakerの種類・数・配置・出力バランスとListener位置を操作することでミックス／マスターを作る。結果をBinaural / Stereoで試聴し、そのまま4ch / 8ch作品として出力できる。**
