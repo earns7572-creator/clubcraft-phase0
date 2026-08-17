@@ -49,6 +49,8 @@ SessionSlot::SessionSlot()
         speakerLinearGains[index].store(1.0f, std::memory_order_relaxed);
         speakerPositionX[index].store(defaultPositions[index].x, std::memory_order_relaxed);
         speakerPositionY[index].store(defaultPositions[index].y, std::memory_order_relaxed);
+        speakerTypeIndices[index].store(
+            speakerTypeToParameterIndex(SpeakerType::fullRange), std::memory_order_relaxed);
     }
 }
 
@@ -76,6 +78,8 @@ void SessionRegistry::publishSnapshot(const SceneSnapshot& snapshot)
         slot->speakerLinearGains[index].store(decibelsToLinearGain(snapshot.speakerLevelDb[index]), std::memory_order_relaxed);
         slot->speakerPositionX[index].store(clampPosition(snapshot.speakerPositions[index].x), std::memory_order_relaxed);
         slot->speakerPositionY[index].store(clampPosition(snapshot.speakerPositions[index].y), std::memory_order_relaxed);
+        slot->speakerTypeIndices[index].store(
+            speakerTypeToParameterIndex(snapshot.speakerTypes[index]), std::memory_order_relaxed);
     }
 
     slot->genericResponseTone.store(
@@ -119,6 +123,8 @@ std::optional<RealtimeSceneSnapshot> SessionRegistry::readSnapshot(const Session
             snapshot.speakerLinearGains[index] = handle->speakerLinearGains[index].load(std::memory_order_relaxed);
             snapshot.speakerPositions[index].x = handle->speakerPositionX[index].load(std::memory_order_relaxed);
             snapshot.speakerPositions[index].y = handle->speakerPositionY[index].load(std::memory_order_relaxed);
+            snapshot.speakerTypes[index] = speakerTypeFromParameterIndex(
+                handle->speakerTypeIndices[index].load(std::memory_order_relaxed));
         }
         snapshot.genericResponseTone = handle->genericResponseTone.load(std::memory_order_relaxed);
 

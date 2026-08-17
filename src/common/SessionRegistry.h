@@ -10,6 +10,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "SpeakerType.h"
+
 namespace clubcraft
 {
 
@@ -40,6 +42,12 @@ struct SceneSnapshot
         PlanarPosition { 6.0f, -6.0f },
     };
     float genericResponseTone = 1.0f;
+    std::array<SpeakerType, kSpeakerCount> speakerTypes {
+        SpeakerType::fullRange,
+        SpeakerType::fullRange,
+        SpeakerType::fullRange,
+        SpeakerType::fullRange,
+    };
 };
 
 /** A value-only snapshot that is safe to copy inside an audio callback. */
@@ -55,6 +63,12 @@ struct RealtimeSceneSnapshot
         PlanarPosition { 6.0f, -6.0f },
     };
     float genericResponseTone = 1.0f;
+    std::array<SpeakerType, kSpeakerCount> speakerTypes {
+        SpeakerType::fullRange,
+        SpeakerType::fullRange,
+        SpeakerType::fullRange,
+        SpeakerType::fullRange,
+    };
 
     [[nodiscard]] float normalizedFullSignalGain() const noexcept;
 };
@@ -82,6 +96,7 @@ struct SessionSlot
     std::array<std::atomic<float>, kSpeakerCount> speakerLinearGains;
     std::array<std::atomic<float>, kSpeakerCount> speakerPositionX;
     std::array<std::atomic<float>, kSpeakerCount> speakerPositionY;
+    std::array<std::atomic<int>, kSpeakerCount> speakerTypeIndices;
     std::atomic<float> genericResponseTone { 1.0f };
     std::atomic<bool> published { false };
 

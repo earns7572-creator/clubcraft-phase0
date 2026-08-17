@@ -104,3 +104,9 @@ Generic Responseは、0%で約1.2 kHz、100%で約18 kHzのlow-pass cutoffを使
 Phase 2では、各SOURCEへ `SOURCE X` と `SOURCE Y` を追加し、CLUBへ `SPEAKER SPREAD` と `SPEAKER DEPTH` を追加しました。SOURCEは4本の仮想Speakerについて、Source→Speaker→Listenerの相対距離を計算します。各経路には距離減衰、距離依存のGeneric Response、最大60 msの相対delay、Speaker X座標に基づくconstant-power stereo panを適用してから、ステレオ出力へ合算します。
 
 この実装は4 Speakerによる**ステレオ空間シミュレーション**です。個人化HRTF、部屋の反射、残響、遮蔽はまだ含みません。Intel Macでの試用手順は [PHASE2_TRYOUT.md](PHASE2_TRYOUT.md)、信号経路とRealtime設計は [PHASE2_DESIGN.md](PHASE2_DESIGN.md) を参照してください。
+
+## Phase 3: Speaker Voices
+
+Phase 3では、CLUBの各Speakerへ `SUB`、`WOOFER`、`FULL RANGE`、`MID`、`HIGH` のSpeaker Typeを設定できます。Speaker Typeは、特定機種を再現するものではなく、広い帯域の役割を表す安全なCharacterです。SOURCE側では、Type固有Characterを通した後に、Phase 2の距離依存Response・距離減衰・相対delay・stereo panを適用します。
+
+既存のLive Setを壊さないため、4本のSpeaker Typeの初期値はすべて `FULL RANGE` です。Phase 3の設計は [PHASE3_DESIGN.md](PHASE3_DESIGN.md)、Intel Macでの更新とAbleton Liveでの試用は [PHASE3_TRYOUT.md](PHASE3_TRYOUT.md) を参照してください。

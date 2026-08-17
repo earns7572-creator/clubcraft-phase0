@@ -10,6 +10,7 @@
 
 #include "GenericSpeakerResponse.h"
 #include "SpatialMath.h"
+#include "SpeakerCharacterResponse.h"
 
 namespace clubcraft
 {
@@ -34,6 +35,8 @@ public:
 
         for (auto& response : speakerResponses)
             response.prepare(sampleRate, maximumBlockSize, 1);
+        for (auto& character : speakerCharacters)
+            character.prepare(sampleRate, maximumBlockSize);
     }
 
     void reset()
@@ -42,6 +45,8 @@ public:
         writeIndex = 0;
         for (auto& response : speakerResponses)
             response.reset();
+        for (auto& character : speakerCharacters)
+            character.reset();
     }
 
     void render(juce::AudioBuffer<float>& buffer,
@@ -77,6 +82,8 @@ public:
             path.responseTone = spatial::toneForRelativePath(
                 scene.genericResponseTone, referencePath, path.totalDistance);
             path.pan = spatial::constantPowerPan(scene.speakerPositions[index].x / maximumAbsX);
+            path.type = scene.speakerTypes[index];
+            speakerCharacters[index].setType(path.type);
         }
 
         for (auto& path : paths)
@@ -102,8 +109,10 @@ public:
             {
                 const auto& path = paths[index];
                 const auto readIndex = (writeIndex + monoDelayLine.size() - path.delaySamples) % monoDelayLine.size();
+                const auto characterSample = speakerCharacters[index].processSample(
+                    monoDelayLine[readIndex]);
                 const auto speakerSample = speakerResponses[index].processSample(
-                    monoDelayLine[readIndex], path.responseTone) * path.gain;
+                    characterSample, path.responseTone) * path.gain;
                 stereoLeft += speakerSample * path.pan.left;
                 stereoRight += speakerSample * path.pan.right;
             }
@@ -121,6 +130,7 @@ private:
         float gain = 0.0f;
         float responseTone = 1.0f;
         spatial::StereoGains pan;
+        SpeakerType type = SpeakerType::fullRange;
         std::size_t delaySamples = 0;
     };
 
@@ -129,6 +139,7 @@ private:
     std::vector<float> monoDelayLine;
     std::size_t writeIndex = 0;
     std::array<GenericSpeakerResponse, kSpeakerCount> speakerResponses;
+    std::array<SpeakerCharacterResponse, kSpeakerCount> speakerCharacters;
 };
 
 } // namespace clubcraft

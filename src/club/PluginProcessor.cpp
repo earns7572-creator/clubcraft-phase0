@@ -7,12 +7,19 @@
 
 namespace
 {
-constexpr int kStateSchemaVersion = 4;
+constexpr int kStateSchemaVersion = 5;
 constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerParameterIds {
     "speakerLevel1",
     "speakerLevel2",
     "speakerLevel3",
     "speakerLevel4",
+};
+
+constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerTypeParameterIds {
+    "speakerType1",
+    "speakerType2",
+    "speakerType3",
+    "speakerType4",
 };
 
 [[nodiscard]] float readParameter(const juce::AudioProcessorValueTreeState& parameters,
@@ -42,6 +49,8 @@ ClubCraftPhase0AudioProcessor::ClubCraftPhase0AudioProcessor()
     parameters.addParameterListener("sourcePositionY", this);
     for (const auto* parameterId : kSpeakerParameterIds)
         parameters.addParameterListener(parameterId, this);
+    for (const auto* parameterId : kSpeakerTypeParameterIds)
+        parameters.addParameterListener(parameterId, this);
 
     refreshSessionHandle();
     lastKnownClubRole.store(isClubRole(), std::memory_order_release);
@@ -66,6 +75,8 @@ ClubCraftPhase0AudioProcessor::~ClubCraftPhase0AudioProcessor()
     parameters.removeParameterListener("sourcePositionX", this);
     parameters.removeParameterListener("sourcePositionY", this);
     for (const auto* parameterId : kSpeakerParameterIds)
+        parameters.removeParameterListener(parameterId, this);
+    for (const auto* parameterId : kSpeakerTypeParameterIds)
         parameters.removeParameterListener(parameterId, this);
     clubcraft::SessionRegistry::instance().unregisterSource(sourceId.toStdString());
 }
@@ -238,6 +249,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout ClubCraftPhase0AudioProcesso
         "speakerLevel3", "Rear L Level", juce::NormalisableRange<float>(-60.0f, 12.0f, 0.01f), 0.0f));
     parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
         "speakerLevel4", "Rear R Level", juce::NormalisableRange<float>(-60.0f, 12.0f, 0.01f), 0.0f));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "speakerType1", "Front L Type", juce::StringArray { "SUB", "WOOFER", "FULL RANGE", "MID", "HIGH" },
+        clubcraft::speakerTypeToParameterIndex(clubcraft::SpeakerType::fullRange)));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "speakerType2", "Front R Type", juce::StringArray { "SUB", "WOOFER", "FULL RANGE", "MID", "HIGH" },
+        clubcraft::speakerTypeToParameterIndex(clubcraft::SpeakerType::fullRange)));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "speakerType3", "Rear L Type", juce::StringArray { "SUB", "WOOFER", "FULL RANGE", "MID", "HIGH" },
+        clubcraft::speakerTypeToParameterIndex(clubcraft::SpeakerType::fullRange)));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "speakerType4", "Rear R Type", juce::StringArray { "SUB", "WOOFER", "FULL RANGE", "MID", "HIGH" },
+        clubcraft::speakerTypeToParameterIndex(clubcraft::SpeakerType::fullRange)));
     parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
         "genericResponseTone", "Generic Response Tone", juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 1.0f));
     parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -291,7 +314,11 @@ void ClubCraftPhase0AudioProcessor::publishClubSnapshot()
     snapshot.revision = revision.fetch_add(1, std::memory_order_relaxed) + 1;
     snapshot.masterLevelDb = readParameter(parameters, "masterLevel");
     for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
+    {
         snapshot.speakerLevelDb[index] = readParameter(parameters, kSpeakerParameterIds[index]);
+        snapshot.speakerTypes[index] = clubcraft::speakerTypeFromParameterIndex(
+            static_cast<int>(readParameter(parameters, kSpeakerTypeParameterIds[index])));
+    }
     snapshot.speakerPositions = {
         clubcraft::PlanarPosition { -speakerSpread, speakerDepth },
         clubcraft::PlanarPosition { speakerSpread, speakerDepth },

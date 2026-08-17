@@ -24,15 +24,22 @@ constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerParameterIds
     "speakerLevel3",
     "speakerLevel4",
 };
+
+constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerTypeParameterIds {
+    "speakerType1",
+    "speakerType2",
+    "speakerType3",
+    "speakerType4",
+};
 }
 
 ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
     ClubCraftPhase0AudioProcessor& processorToUse)
     : AudioProcessorEditor(&processorToUse), pluginProcessor(processorToUse)
 {
-    setSize(720, 690);
+    setSize(720, 720);
     setResizable(true, true);
-    setResizeLimits(540, 500, 1080, 920);
+    setResizeLimits(600, 560, 1080, 960);
 
     titleLabel.setText("CLUB CRAFT", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(20.0f).withKerningFactor(0.18f));
@@ -80,13 +87,28 @@ ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
     configureMeterSlider(speakerSpreadSlider, speakerSpreadLabel, "SPEAKER SPREAD");
     configureMeterSlider(speakerDepthSlider, speakerDepthLabel, "SPEAKER DEPTH");
 
-    speakerSectionLabel.setText("FULL SIGNAL SPEAKERS", juce::dontSendNotification);
+    speakerSectionLabel.setText("SPEAKER VOICES", juce::dontSendNotification);
     speakerSectionLabel.setFont(juce::FontOptions(11.0f).withKerningFactor(0.12f));
     speakerSectionLabel.setColour(juce::Label::textColourId, kMutedGraphite);
     addAndMakeVisible(speakerSectionLabel);
 
     for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
+    {
         configureDbSlider(speakerSliders[index], speakerLabels[index], kSpeakerNames[index]);
+
+        auto& selector = speakerTypeSelectors[index];
+        selector.addItem("SUB", 1);
+        selector.addItem("WOOFER", 2);
+        selector.addItem("FULL RANGE", 3);
+        selector.addItem("MID", 4);
+        selector.addItem("HIGH", 5);
+        selector.setJustificationType(juce::Justification::centred);
+        selector.setColour(juce::ComboBox::backgroundColourId, kBackground);
+        selector.setColour(juce::ComboBox::outlineColourId, kGraphite.withAlpha(0.18f));
+        selector.setColour(juce::ComboBox::textColourId, kGraphite);
+        selector.setColour(juce::ComboBox::arrowColourId, kGraphite);
+        addAndMakeVisible(selector);
+    }
 
     roleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         pluginProcessor.getParameters(), "role", roleSelector);
@@ -107,6 +129,8 @@ ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
     {
         speakerAttachments[index] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             pluginProcessor.getParameters(), kSpeakerParameterIds[index], speakerSliders[index]);
+        speakerTypeAttachments[index] = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            pluginProcessor.getParameters(), kSpeakerTypeParameterIds[index], speakerTypeSelectors[index]);
     }
 
     refreshStatus();
@@ -174,7 +198,8 @@ void ClubCraftPhase0AudioProcessorEditor::resized()
     for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
     {
         auto row = panel.removeFromTop(speakerRowHeight);
-        speakerLabels[index].setBounds(row.removeFromLeft(190));
+        speakerLabels[index].setBounds(row.removeFromLeft(145));
+        speakerTypeSelectors[index].setBounds(row.removeFromLeft(126).reduced(3, 7));
         speakerSliders[index].setBounds(row.reduced(4, 5));
     }
 }
@@ -263,13 +288,15 @@ void ClubCraftPhase0AudioProcessorEditor::refreshStatus()
     speakerDepthSlider.setEnabled(isClub);
     for (auto& speakerSlider : speakerSliders)
         speakerSlider.setEnabled(isClub);
+    for (auto& speakerTypeSelector : speakerTypeSelectors)
+        speakerTypeSelector.setEnabled(isClub);
 
     sourceXSlider.setEnabled(!isClub);
     sourceYSlider.setEnabled(!isClub);
 
     if (isClub)
     {
-        connectionLabel.setText("CLUB / publishes 4-speaker spatial scene", juce::dontSendNotification);
+        connectionLabel.setText("CLUB / publishes speaker voices & spatial scene", juce::dontSendNotification);
     }
     else
     {

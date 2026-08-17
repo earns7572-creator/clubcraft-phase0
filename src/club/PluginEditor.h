@@ -51,6 +51,7 @@ private:
 
     juce::Label speakerSectionLabel;
     std::array<juce::Label, clubcraft::kSpeakerCount> speakerLabels;
+    std::array<juce::ComboBox, clubcraft::kSpeakerCount> speakerTypeSelectors;
     std::array<juce::Slider, clubcraft::kSpeakerCount> speakerSliders;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> roleAttachment;
@@ -61,6 +62,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> speakerSpreadAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> speakerDepthAttachment;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, clubcraft::kSpeakerCount> speakerAttachments;
+    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, clubcraft::kSpeakerCount> speakerTypeAttachments;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClubCraftPhase0AudioProcessorEditor)
 };

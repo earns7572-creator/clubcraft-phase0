@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ClubCraftPhase0 VERSION 0.3.0 LANGUAGES C CXX)
+project(ClubCraftPhase0 VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,8 +90,17 @@ if(CLUBCRAFT_BUILD_TESTS)
         tests/SessionRegistryTests.cpp
     )
 
-    target_link_libraries(ClubCraftCoreTests PRIVATE ClubCraftCore)
+    target_link_libraries(ClubCraftCoreTests
+        PRIVATE
+            ClubCraftCore
+            juce::juce_dsp
+    )
     target_compile_features(ClubCraftCoreTests PRIVATE cxx_std_20)
+    target_compile_definitions(ClubCraftCoreTests
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+    )
 
     add_test(NAME ClubCraftCoreTests COMMAND ClubCraftCoreTests)
 endif()
