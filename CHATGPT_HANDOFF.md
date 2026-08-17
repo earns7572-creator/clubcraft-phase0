@@ -485,7 +485,11 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 - SOURCE→Speaker routingを中心に置く
 - Stereo previewとDiscrete outputを分離して考える
 
-まず設計資料を作り、コード変更前にレビューする。**実装開始前に [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) のGate A〜Hを設計として明示的に承認すること。**
+まず設計資料を作り、コード変更前にレビューする。**実装開始前に [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) のGate A〜Hを設計として明示的に承認すること。** Gateは設計上GOとなったが、0.6.0ではOutput backendを固定しない。CLUBをControl Plane、SOURCEをAudio Workerとし、Route Contribution → Virtual Speaker Voice → Preview / Discrete Outputの3層を実装境界とする。Virtual Speaker Voiceは線形DSPだけに限定する。
+
+### 0.6.x — Host I/O Decision
+
+0.6.0で実施する`OUTPUT_FEASIBILITY_SPIKE.md`の結果をArchitecture Decision Recordとして確定する。VST3 / AUとAbleton Live / Logic Pro / ReaperにおけるStereo、Quad、8ch、Preview + Aux出力のbus negotiationを確認し、その結果が出るまでSOURCE audioの最終multi-channel aggregation方式を決め打ちしない。
 
 ### 0.7.0 — Dynamic Speaker Scene
 
@@ -573,7 +577,7 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 5. SOURCE→Speaker audio routingをどう実装するか提案
 6. Stereo/Binaural previewと4/8ch discrete outputの責務分離を提案
 7. APVTS / state migration方針を提案
-8. V1上限（例: 16 speakers / 128 routes）を提案
+8. V1上限として `MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_GLOBAL=512`、`MAX_ROUTES_PER_SOURCE=16` を前提に、overflowをcontrol側でrejectする設計を確認
 9. 変更対象ファイル一覧を提示
 10. [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) のGate A〜Hを満たす設計を提示する
 11. その設計を承認されるまでコードを書かない

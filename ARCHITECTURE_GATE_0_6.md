@@ -149,3 +149,86 @@ SpeakerはStable Speaker IDを持つ。Realtime Planはspeaker slotに加えてg
 - [ ] schema≤6 migrationとlegacy `/4`互換方針が決まっている。
 - [ ] 4ch / 8ch feasibility spikeを実施する計画がある。
 - [ ] 0.6.0ではBand、HRTF、4/8ch、RTA、new UIを実装しないことに合意している。
+
+## Architecture Gate Review Resolution
+
+ChatGPTの設計レビューを反映し、以下を0.6.0開始時点の確定判断とする。この節が前節と衝突する場合は、この節を優先する。
+
+### Control Plane / Audio Worker
+
+| 役割 | 確定した責務 |
+|---|---|
+| CLUB | Control Plane。Speaker、Route、Listener、Output設定のauthoritative stateを保存し、Scene Compilerを実行する。 |
+| SOURCE | Audio Worker。自分のSource IDとSession membershipを持ち、自分専用にcompile済みのRoutePlanだけをaudio callbackで処理する。 |
+| SessionRegistry | Audio bufferを持たない。CLUBがcompileしたprimitive realtime planをSOURCEへ公開する。 |
+
+1 Sessionには**authoritative CLUB publisherを1つだけ**許可する。同じSessionへ2個目のCLUBが登録された場合は、silent last-writer-winsにせずConflict状態にする。Conflict側はScene publishを行わず、UIでユーザーへ明示する。
+
+### 3層Audio Model
+
+Speaker Feedを次の3層に分ける。
+
+```text
+SOURCE INPUT
+  → Route Contribution (FULL / 将来のBAND)
+  → Virtual Speaker Voice (Type response / Level / Enable / Mute)
+  → Preview Renderer または Discrete Output Mapper
+```
+
+Speaker Position、Listener Position、距離、HRTFはPreview Rendererだけに作用する。これらはVirtual Speaker VoiceやDiscrete 4ch / 8ch Feedを変更しない。これによりBinaural Previewを改善しても、作品として出力するSpeaker Feedは変わらない。
+
+SOURCEごとに分散して処理するV1では、Virtual Speaker VoiceのDSPは**線形処理だけ**に限定する。Speaker Type filter、level、muteは許可するが、saturation、speaker distortion、limiter、nonlinear compressionのように「SOURCEごとの処理結果を後で加算してもSpeaker合算後の結果と等しくならない」DSPは追加禁止とする。
+
+### Route Input Rule
+
+0.6.0で実際に処理する入力は `SUM_MONO = 0.5 * (L + R)` のFull Routeだけとする。RouteConfigには将来の互換性のため、次のfieldを今から保存する。
+
+| InputChannelMode | 0.6.0 |
+|---|---|
+| `SUM_MONO` | 実装・テスト対象 |
+| `LEFT` | data modelのみ予約 |
+| `RIGHT` | data modelのみ予約 |
+| `STEREO_PAIR` | 2本のRouteで表す将来概念 |
+
+### ID / Slot Reuse / Duplicate Rules
+
+Speaker Routeのrealtime参照は、`speakerSlot + speakerGeneration` を使う。Speaker削除後に同じslotを別Speakerへ再利用した場合、generationが一致しない古いRouteは無効として扱う。古いRouteを新Speakerへ自動接続してはいけない。
+
+同一Sessionでduplicate Source IDが登録された場合、後から登録したSOURCEは新しいSource IDを生成して登録する。既存Routeは自動で複製しない。これはDAW Track複製で意図しないSpeaker routingを作らないための安全規則である。
+
+### State Authority / Legacy Bridge
+
+0.6.0以降のauthoritative stateはDynamic Sceneである。旧APVTS parameterは削除しないが、最初の4 Speaker Slotとの**compatibility bridge**として扱う。Dynamic Sceneと旧APVTSの二重authoritative ownerを作らない。
+
+Legacy schema≤6を開く時は、4 Speaker parameterをSlot 0〜3へ移し、legacy routeに限って内部linear gain `0.25` を設定する。新Sceneのroute gainはunityを初期値とし、Speaker数で自動normalizationしない。
+
+### Host I/O Decision Gate
+
+0.6.0では4ch / 8ch Output backendを不可逆に決めない。隔離された`OUTPUT_FEASIBILITY_SPIKE.md`を作り、Stereo In→Stereo Out、Stereo In→Quad Out、Stereo In→8ch Out、Stereo Preview + Aux 8chの各案について、VST3/AUとAbleton/Logic/Reaperのbus negotiationを確認する。
+
+結果は0.6.xのArchitecture Decision Recordとして確定する。SOURCE audioを最終multi-channelへ集約する方式は、このspikeの結果が出るまで固定しない。
+
+### 0.6.0の追加テスト必須項目
+
+- 0 / 1 / 16 Speaker、0 Route、16 Route per Source、512 Global Route。
+- 513本目のRouteをcontrol側で明確にrejectすること。
+- Speaker delete、slot reuse、generation mismatch、deleted Speakerへのstale Route。
+- duplicate Source ID、duplicate CLUB publisher。
+- schema≤6 migration、legacy 4 Speaker mapping、legacy `0.25` gain、新Scene unity route、no auto-normalization。
+- Route enable / disable、Scene revision更新、save / restore、CLUB/SOURCE作成順。
+- 将来の必須QAとして100 SOURCE、offline render、block size / sample rate変更、rapid scene update、route deletion during processingをロードマップへ残す。
+
+### 最終Gate判定
+
+| Gate | 判定 |
+|---|---|
+| A: Routing ownership | PASS |
+| B: Speaker Voice / Preview separation | PASS（3層化・線形DSP制約込み） |
+| C: Stereo input rule | PASS |
+| D: Fixed capacity plan | PASS |
+| E: Stable ID / duplicate handling | PASS（duplicate CLUB込み） |
+| F: State migration | PASS |
+| G: 4/8ch | Plan PASS。technical resultはspike待ち |
+| H: 0.6 scope | PASS |
+
+**0.6.0は設計上GOとする。** ただし、Output backendを決め打ちせず、Gateの実装範囲を超えるBand DSP、HRTF、4/8ch本実装、RTA、Dynamic Speaker UIを追加しないことを開始条件とする。

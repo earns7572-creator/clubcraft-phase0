@@ -87,7 +87,14 @@ ARCHITECTURE_GATE_0_6.md のGate A〜Hを満たす設計を確認し、0.6.0の�
 - 現行Live Setを可能な限り壊さない
 - 既存4 Speaker Sceneはlegacy/default sceneとしてmigration可能にする
 - Stereo Previewは暫定互換として残してよいが、完成形APIとは分離する
-- Band routing / Binaural / 4ch / 8ch / 新UIはまだ完成させない
+- CL​​UBをControl Plane、SOURCEをAudio Workerとして実装する。Routingのauthoritative stateはCLUBにのみ保存する
+- Route Contribution → Virtual Speaker Voice → Preview / Discrete Outputの3層を明示する。Virtual Speaker Voiceは線形DSPに限定し、saturation / limiter / distortion / nonlinear compressionは追加しない
+- SOURCEのaudio threadは自分専用の最大16 RoutePlanだけを読む。Global Routeを全走査しない
+- `MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_GLOBAL=512`、`MAX_ROUTES_PER_SOURCE=16`を採用し、overflowはcontrol側で明確にrejectする
+- Speaker slot + generationでstale Routeを無効にし、duplicate SOURCEは新IDへrekeyしてRouteを自動複製しない。duplicate CLUBはConflictとしてpublishしない
+- Dynamic Sceneをauthoritative state、旧APVTSを最初の4 Speaker用compatibility bridgeとして扱う。legacy migration時だけ内部gain 0.25を使い、新Sceneを自動normalizationしない
+- `OUTPUT_FEASIBILITY_SPIKE.md` を作成し、4ch / 8ch backendを決め打ちせずHost I/O実現可能性を記録する
+- Band routing / Binaural / 4ch / 8ch本実装 / 新UIはまだ完成させない
 
 作業:
 1. 先に0.6.0設計文書をcommit対象として作成
