@@ -14,11 +14,18 @@ constexpr float kMinLevelDb = -96.0f;
 constexpr float kMaxLevelDb = 24.0f;
 constexpr float kMinResponseTone = 0.0f;
 constexpr float kMaxResponseTone = 1.0f;
+constexpr float kMinPosition = -30.0f;
+constexpr float kMaxPosition = 30.0f;
 
 [[nodiscard]] float decibelsToLinearGain(float levelDb) noexcept
 {
     const auto clampedDb = std::clamp(levelDb, kMinLevelDb, kMaxLevelDb);
     return std::pow(10.0f, clampedDb / 20.0f);
+}
+
+[[nodiscard]] float clampPosition(float value) noexcept
+{
+    return std::clamp(value, kMinPosition, kMaxPosition);
 }
 }
 
@@ -30,8 +37,19 @@ float RealtimeSceneSnapshot::normalizedFullSignalGain() const noexcept
 
 SessionSlot::SessionSlot()
 {
-    for (auto& gain : speakerLinearGains)
-        gain.store(1.0f, std::memory_order_relaxed);
+    constexpr std::array<PlanarPosition, kSpeakerCount> defaultPositions {
+        PlanarPosition { -6.0f, 6.0f },
+        PlanarPosition { 6.0f, 6.0f },
+        PlanarPosition { -6.0f, -6.0f },
+        PlanarPosition { 6.0f, -6.0f },
+    };
+
+    for (std::size_t index = 0; index < kSpeakerCount; ++index)
+    {
+        speakerLinearGains[index].store(1.0f, std::memory_order_relaxed);
+        speakerPositionX[index].store(defaultPositions[index].x, std::memory_order_relaxed);
+        speakerPositionY[index].store(defaultPositions[index].y, std::memory_order_relaxed);
+    }
 }
 
 SessionRegistry& SessionRegistry::instance()
@@ -53,8 +71,12 @@ void SessionRegistry::publishSnapshot(const SceneSnapshot& snapshot)
     slot->sequence.store(beforeWrite + 1, std::memory_order_release);
 
     slot->masterLinearGain.store(decibelsToLinearGain(snapshot.masterLevelDb), std::memory_order_relaxed);
-    for (std::size_t index = 0; index < kPhase1SpeakerCount; ++index)
+    for (std::size_t index = 0; index < kSpeakerCount; ++index)
+    {
         slot->speakerLinearGains[index].store(decibelsToLinearGain(snapshot.speakerLevelDb[index]), std::memory_order_relaxed);
+        slot->speakerPositionX[index].store(clampPosition(snapshot.speakerPositions[index].x), std::memory_order_relaxed);
+        slot->speakerPositionY[index].store(clampPosition(snapshot.speakerPositions[index].y), std::memory_order_relaxed);
+    }
 
     slot->genericResponseTone.store(
         std::clamp(snapshot.genericResponseTone, kMinResponseTone, kMaxResponseTone), std::memory_order_relaxed);
@@ -92,8 +114,12 @@ std::optional<RealtimeSceneSnapshot> SessionRegistry::readSnapshot(const Session
         RealtimeSceneSnapshot snapshot;
         snapshot.revision = handle->revision.load(std::memory_order_relaxed);
         snapshot.masterLinearGain = handle->masterLinearGain.load(std::memory_order_relaxed);
-        for (std::size_t index = 0; index < kPhase1SpeakerCount; ++index)
+        for (std::size_t index = 0; index < kSpeakerCount; ++index)
+        {
             snapshot.speakerLinearGains[index] = handle->speakerLinearGains[index].load(std::memory_order_relaxed);
+            snapshot.speakerPositions[index].x = handle->speakerPositionX[index].load(std::memory_order_relaxed);
+            snapshot.speakerPositions[index].y = handle->speakerPositionY[index].load(std::memory_order_relaxed);
+        }
         snapshot.genericResponseTone = handle->genericResponseTone.load(std::memory_order_relaxed);
 
         const auto sequenceAfter = handle->sequence.load(std::memory_order_acquire);

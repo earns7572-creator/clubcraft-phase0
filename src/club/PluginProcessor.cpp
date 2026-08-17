@@ -7,8 +7,8 @@
 
 namespace
 {
-constexpr int kStateSchemaVersion = 3;
-constexpr std::array<const char*, clubcraft::kPhase1SpeakerCount> kSpeakerParameterIds {
+constexpr int kStateSchemaVersion = 4;
+constexpr std::array<const char*, clubcraft::kSpeakerCount> kSpeakerParameterIds {
     "speakerLevel1",
     "speakerLevel2",
     "speakerLevel3",
@@ -29,12 +29,17 @@ ClubCraftPhase0AudioProcessor::ClubCraftPhase0AudioProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      // Keep the Phase 1 root ID so existing Live Sets restore their parameters.
       parameters(*this, nullptr, juce::Identifier("ClubCraftPhase1State"), createParameterLayout()),
       sourceId(juce::Uuid().toString())
 {
     parameters.addParameterListener("role", this);
     parameters.addParameterListener("masterLevel", this);
     parameters.addParameterListener("genericResponseTone", this);
+    parameters.addParameterListener("speakerSpread", this);
+    parameters.addParameterListener("speakerDepth", this);
+    parameters.addParameterListener("sourcePositionX", this);
+    parameters.addParameterListener("sourcePositionY", this);
     for (const auto* parameterId : kSpeakerParameterIds)
         parameters.addParameterListener(parameterId, this);
 
@@ -56,6 +61,10 @@ ClubCraftPhase0AudioProcessor::~ClubCraftPhase0AudioProcessor()
     parameters.removeParameterListener("role", this);
     parameters.removeParameterListener("masterLevel", this);
     parameters.removeParameterListener("genericResponseTone", this);
+    parameters.removeParameterListener("speakerSpread", this);
+    parameters.removeParameterListener("speakerDepth", this);
+    parameters.removeParameterListener("sourcePositionX", this);
+    parameters.removeParameterListener("sourcePositionY", this);
     for (const auto* parameterId : kSpeakerParameterIds)
         parameters.removeParameterListener(parameterId, this);
     clubcraft::SessionRegistry::instance().unregisterSource(sourceId.toStdString());
@@ -63,12 +72,12 @@ ClubCraftPhase0AudioProcessor::~ClubCraftPhase0AudioProcessor()
 
 void ClubCraftPhase0AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    genericSpeakerResponse.prepare(sampleRate, samplesPerBlock, std::max(1, getTotalNumOutputChannels()));
+    spatialRenderer.prepare(sampleRate, samplesPerBlock);
 }
 
 void ClubCraftPhase0AudioProcessor::releaseResources()
 {
-    genericSpeakerResponse.reset();
+    spatialRenderer.reset();
 }
 
 bool ClubCraftPhase0AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -92,13 +101,7 @@ void ClubCraftPhase0AudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     }
 
     if (const auto snapshot = clubcraft::SessionRegistry::readSnapshot(sessionHandle))
-    {
-        // All Phase 1 speakers receive the source's full signal. As the generic
-        // response is shared, rendering it once before the normalized sum is
-        // mathematically equivalent to rendering the same response on each route.
-        genericSpeakerResponse.process(buffer, snapshot->genericResponseTone);
-        buffer.applyGain(snapshot->normalizedFullSignalGain());
-    }
+        spatialRenderer.render(buffer, *snapshot, sourcePosition());
 }
 
 juce::AudioProcessorEditor* ClubCraftPhase0AudioProcessor::createEditor()
@@ -191,7 +194,7 @@ void ClubCraftPhase0AudioProcessor::setStateInformation(const void* data, int si
     sourceName = isClubRole() ? "Club" : "Source";
     lastKnownClubRole.store(!isClubRole(), std::memory_order_release);
     snapshotDirty.store(true, std::memory_order_release);
-    genericSpeakerResponse.reset();
+    spatialRenderer.reset();
     reconcileRole();
 }
 
@@ -237,6 +240,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout ClubCraftPhase0AudioProcesso
         "speakerLevel4", "Rear R Level", juce::NormalisableRange<float>(-60.0f, 12.0f, 0.01f), 0.0f));
     parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
         "genericResponseTone", "Generic Response Tone", juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 1.0f));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "speakerSpread", "Speaker Spread", juce::NormalisableRange<float>(0.5f, 15.0f, 0.01f), 6.0f));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "speakerDepth", "Speaker Depth", juce::NormalisableRange<float>(0.5f, 15.0f, 0.01f), 6.0f));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "sourcePositionX", "Source X", juce::NormalisableRange<float>(-12.0f, 12.0f, 0.01f), 0.0f));
+    parameterLayout.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "sourcePositionY", "Source Y", juce::NormalisableRange<float>(-12.0f, 12.0f, 0.01f), 0.0f));
 
     return { parameterLayout.begin(), parameterLayout.end() };
 }
@@ -272,12 +283,21 @@ void ClubCraftPhase0AudioProcessor::publishClubSnapshot()
     if (!isClubRole())
         return;
 
+    const auto speakerSpread = readParameter(parameters, "speakerSpread");
+    const auto speakerDepth = readParameter(parameters, "speakerDepth");
+
     clubcraft::SceneSnapshot snapshot;
     snapshot.sessionId = sessionId.toStdString();
     snapshot.revision = revision.fetch_add(1, std::memory_order_relaxed) + 1;
     snapshot.masterLevelDb = readParameter(parameters, "masterLevel");
-    for (std::size_t index = 0; index < clubcraft::kPhase1SpeakerCount; ++index)
+    for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
         snapshot.speakerLevelDb[index] = readParameter(parameters, kSpeakerParameterIds[index]);
+    snapshot.speakerPositions = {
+        clubcraft::PlanarPosition { -speakerSpread, speakerDepth },
+        clubcraft::PlanarPosition { speakerSpread, speakerDepth },
+        clubcraft::PlanarPosition { -speakerSpread, -speakerDepth },
+        clubcraft::PlanarPosition { speakerSpread, -speakerDepth },
+    };
     snapshot.genericResponseTone = readParameter(parameters, "genericResponseTone");
 
     clubcraft::SessionRegistry::instance().publishSnapshot(snapshot);
@@ -292,6 +312,7 @@ void ClubCraftPhase0AudioProcessor::registerAsSource()
         .sourceId = sourceId.toStdString(),
         .sessionId = sessionId.toStdString(),
         .displayName = sourceName.toStdString(),
+        .position = sourcePosition(),
         .heartbeat = revision.fetch_add(1, std::memory_order_relaxed) + 1,
     });
 }
@@ -309,7 +330,7 @@ void ClubCraftPhase0AudioProcessor::reconcileRole()
 
     sourceName = currentRole ? "Club" : "Source";
     snapshotDirty.store(true, std::memory_order_release);
-    genericSpeakerResponse.reset();
+    spatialRenderer.reset();
 
     if (currentRole)
         publishClubSnapshot();
@@ -326,6 +347,14 @@ void ClubCraftPhase0AudioProcessor::restoreLegacyPrimarySpeakerLevel(const juce:
     const auto legacyValue = static_cast<float>(legacyParameter.getProperty("value", 0.0f));
     if (auto* speakerOne = parameters.getParameter("speakerLevel1"))
         speakerOne->setValueNotifyingHost(speakerOne->convertTo0to1(legacyValue));
+}
+
+clubcraft::PlanarPosition ClubCraftPhase0AudioProcessor::sourcePosition() const noexcept
+{
+    return {
+        readParameter(parameters, "sourcePositionX"),
+        readParameter(parameters, "sourcePositionY"),
+    };
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

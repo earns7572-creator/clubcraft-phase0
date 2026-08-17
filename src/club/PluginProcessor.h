@@ -3,8 +3,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
-#include "GenericSpeakerResponse.h"
 #include "SessionRegistry.h"
+#include "StereoSpatialRenderer.h"
 
 class ClubCraftPhase0AudioProcessor final : public juce::AudioProcessor,
                                              private juce::AudioProcessorValueTreeState::Listener,
@@ -55,13 +55,14 @@ private:
     void registerAsSource();
     void reconcileRole();
     void restoreLegacyPrimarySpeakerLevel(const juce::ValueTree& restoredState);
+    [[nodiscard]] clubcraft::PlanarPosition sourcePosition() const noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
     juce::String sessionId { "phase0-default-club" };
     juce::String sourceId;
     juce::String sourceName { "Source" };
     clubcraft::SessionRegistry::SessionHandle sessionHandle;
-    clubcraft::GenericSpeakerResponse genericSpeakerResponse;
+    clubcraft::StereoSpatialRenderer spatialRenderer;
     std::atomic<bool> snapshotDirty { true };
     std::atomic<std::uint64_t> revision { 0 };
     std::atomic<bool> lastKnownClubRole { false };

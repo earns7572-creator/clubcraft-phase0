@@ -44,6 +44,12 @@ public:
         filter.process(context);
     }
 
+    [[nodiscard]] float processSample(float input, float responseTone) noexcept
+    {
+        filter.setCutoffFrequency(cutoffForTone(responseTone));
+        return filter.processSample(0, input);
+    }
+
     [[nodiscard]] static float cutoffForTone(float responseTone) noexcept
     {
         constexpr float kDarkCutoffHz = 1200.0f;

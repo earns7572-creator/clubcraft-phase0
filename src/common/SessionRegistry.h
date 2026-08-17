@@ -13,7 +13,15 @@
 namespace clubcraft
 {
 
-inline constexpr std::size_t kPhase1SpeakerCount = 4;
+inline constexpr std::size_t kSpeakerCount = 4;
+// Retained for Phase 1 source compatibility while callers migrate to kSpeakerCount.
+inline constexpr std::size_t kPhase1SpeakerCount = kSpeakerCount;
+
+struct PlanarPosition
+{
+    float x = 0.0f;
+    float y = 0.0f;
+};
 
 /**
     Non-realtime control data submitted by the CLUB instance.
@@ -24,7 +32,13 @@ struct SceneSnapshot
     std::string sessionId;
     std::uint64_t revision = 0;
     float masterLevelDb = 0.0f;
-    std::array<float, kPhase1SpeakerCount> speakerLevelDb { 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<float, kSpeakerCount> speakerLevelDb { 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<PlanarPosition, kSpeakerCount> speakerPositions {
+        PlanarPosition { -6.0f, 6.0f },
+        PlanarPosition { 6.0f, 6.0f },
+        PlanarPosition { -6.0f, -6.0f },
+        PlanarPosition { 6.0f, -6.0f },
+    };
     float genericResponseTone = 1.0f;
 };
 
@@ -33,7 +47,13 @@ struct RealtimeSceneSnapshot
 {
     std::uint64_t revision = 0;
     float masterLinearGain = 1.0f;
-    std::array<float, kPhase1SpeakerCount> speakerLinearGains { 1.0f, 1.0f, 1.0f, 1.0f };
+    std::array<float, kSpeakerCount> speakerLinearGains { 1.0f, 1.0f, 1.0f, 1.0f };
+    std::array<PlanarPosition, kSpeakerCount> speakerPositions {
+        PlanarPosition { -6.0f, 6.0f },
+        PlanarPosition { 6.0f, 6.0f },
+        PlanarPosition { -6.0f, -6.0f },
+        PlanarPosition { 6.0f, -6.0f },
+    };
     float genericResponseTone = 1.0f;
 
     [[nodiscard]] float normalizedFullSignalGain() const noexcept;
@@ -44,6 +64,7 @@ struct SourceRegistration
     std::string sourceId;
     std::string sessionId;
     std::string displayName;
+    PlanarPosition position;
     std::uint64_t heartbeat = 0;
 };
 
@@ -58,7 +79,9 @@ struct SessionSlot
     std::atomic<std::uint64_t> sequence { 0 };
     std::atomic<std::uint64_t> revision { 0 };
     std::atomic<float> masterLinearGain { 1.0f };
-    std::array<std::atomic<float>, kPhase1SpeakerCount> speakerLinearGains;
+    std::array<std::atomic<float>, kSpeakerCount> speakerLinearGains;
+    std::array<std::atomic<float>, kSpeakerCount> speakerPositionX;
+    std::array<std::atomic<float>, kSpeakerCount> speakerPositionY;
     std::atomic<float> genericResponseTone { 1.0f };
     std::atomic<bool> published { false };
 
