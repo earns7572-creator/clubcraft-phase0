@@ -116,3 +116,7 @@ Phase 3では、CLUBの各Speakerへ `SUB`、`WOOFER`、`FULL RANGE`、`MID`、`
 SOURCEはクラブのステージ原点に固定されます。CLUBでは各Speakerの個別X/Y位置と、`LISTENER / AUDIENCE POSITION` を操作します。SpeakerとListenerの相対位置から、経路距離、相対delay、高域減衰、stereo panを計算するため、従来の対称な `SPEAKER SPREAD / DEPTH` 操作よりも、動かした対象と鳴り方の関係を理解しやすくします。
 
 この更新はステレオ出力の空間シミュレーションであり、完全な前後HRTFはまだ含みません。座標の責任分担と信号処理は [FIXED_SOURCE_LAYOUT_DESIGN.md](FIXED_SOURCE_LAYOUT_DESIGN.md)、Intel Mac / Ableton Liveでの試用は [FIXED_SOURCE_LAYOUT_TRYOUT.md](FIXED_SOURCE_LAYOUT_TRYOUT.md) を参照してください。
+
+## ChatGPTへの開発引き継ぎ
+
+完成版1.0までの全ロードマップ、絶対に守る設計条件、現行実装、未解決事項、Macでの検証方法は [CHATGPT_HANDOFF.md](CHATGPT_HANDOFF.md) にまとめています。ChatGPTへ渡す開始文と各Phaseの依頼文は [CHATGPT_PROMPTS.md](CHATGPT_PROMPTS.md) を参照してください。
