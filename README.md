@@ -110,3 +110,9 @@ Phase 2では、各SOURCEへ `SOURCE X` と `SOURCE Y` を追加し、CLUBへ `S
 Phase 3では、CLUBの各Speakerへ `SUB`、`WOOFER`、`FULL RANGE`、`MID`、`HIGH` のSpeaker Typeを設定できます。Speaker Typeは、特定機種を再現するものではなく、広い帯域の役割を表す安全なCharacterです。SOURCE側では、Type固有Characterを通した後に、Phase 2の距離依存Response・距離減衰・相対delay・stereo panを適用します。
 
 既存のLive Setを壊さないため、4本のSpeaker Typeの初期値はすべて `FULL RANGE` です。Phase 3の設計は [PHASE3_DESIGN.md](PHASE3_DESIGN.md)、Intel Macでの更新とAbleton Liveでの試用は [PHASE3_TRYOUT.md](PHASE3_TRYOUT.md) を参照してください。
+
+## Fixed Source / Speaker & Listener Layout
+
+SOURCEはクラブのステージ原点に固定されます。CLUBでは各Speakerの個別X/Y位置と、`LISTENER / AUDIENCE POSITION` を操作します。SpeakerとListenerの相対位置から、経路距離、相対delay、高域減衰、stereo panを計算するため、従来の対称な `SPEAKER SPREAD / DEPTH` 操作よりも、動かした対象と鳴り方の関係を理解しやすくします。
+
+この更新はステレオ出力の空間シミュレーションであり、完全な前後HRTFはまだ含みません。座標の責任分担と信号処理は [FIXED_SOURCE_LAYOUT_DESIGN.md](FIXED_SOURCE_LAYOUT_DESIGN.md)、Intel Mac / Ableton Liveでの試用は [FIXED_SOURCE_LAYOUT_TRYOUT.md](FIXED_SOURCE_LAYOUT_TRYOUT.md) を参照してください。

@@ -39,6 +39,7 @@ void testSpatialSceneSnapshotPublication()
             clubcraft::PlanarPosition { 4.0f, -7.0f },
         },
         .genericResponseTone = 0.35f,
+        .listenerPosition = { 2.5f, -3.0f },
         .speakerTypes = {
             clubcraft::SpeakerType::sub,
             clubcraft::SpeakerType::woofer,
@@ -60,6 +61,8 @@ void testSpatialSceneSnapshotPublication()
     assertNear(published->speakerPositions[3].x, 4.0f);
     assertNear(published->speakerPositions[3].y, -7.0f);
     assertNear(published->genericResponseTone, 0.35f);
+    assertNear(published->listenerPosition.x, 2.5f);
+    assertNear(published->listenerPosition.y, -3.0f);
     assert(published->speakerTypes[0] == clubcraft::SpeakerType::sub);
     assert(published->speakerTypes[1] == clubcraft::SpeakerType::woofer);
     assert(published->speakerTypes[2] == clubcraft::SpeakerType::mid);
@@ -150,6 +153,18 @@ void testSpatialMath()
     const auto right = spatial::constantPowerPan(1.0f);
     assertNear(right.left, 0.0f);
     assertNear(right.right, 1.0f);
+
+    const auto rightOfListener = spatial::panForSpeakerAndListener({ 6.0f, 0.0f }, { 0.0f, 0.0f });
+    assertNear(rightOfListener.left, 0.0f);
+    assertNear(rightOfListener.right, 1.0f);
+
+    const auto directlyInFront = spatial::panForSpeakerAndListener({ 0.0f, 6.0f }, { 0.0f, 0.0f });
+    assertNear(directlyInFront.left, 0.70710678f);
+    assertNear(directlyInFront.right, 0.70710678f);
+
+    const auto listenerMovedRightAndForward = spatial::panForSpeakerAndListener({ 6.0f, 0.0f }, { 4.0f, 4.0f });
+    assert(listenerMovedRightAndForward.left > rightOfListener.left + 0.1f);
+    assert(listenerMovedRightAndForward.right < rightOfListener.right - 0.05f);
 
     assertNear(spatial::gainForRelativePath(12.0f, 12.0f), 1.0f);
     assertNear(spatial::gainForRelativePath(12.0f, 24.0f), 0.5f);

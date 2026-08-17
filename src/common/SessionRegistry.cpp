@@ -82,6 +82,8 @@ void SessionRegistry::publishSnapshot(const SceneSnapshot& snapshot)
             speakerTypeToParameterIndex(snapshot.speakerTypes[index]), std::memory_order_relaxed);
     }
 
+    slot->listenerPositionX.store(clampPosition(snapshot.listenerPosition.x), std::memory_order_relaxed);
+    slot->listenerPositionY.store(clampPosition(snapshot.listenerPosition.y), std::memory_order_relaxed);
     slot->genericResponseTone.store(
         std::clamp(snapshot.genericResponseTone, kMinResponseTone, kMaxResponseTone), std::memory_order_relaxed);
     slot->revision.store(snapshot.revision, std::memory_order_relaxed);
@@ -126,6 +128,8 @@ std::optional<RealtimeSceneSnapshot> SessionRegistry::readSnapshot(const Session
             snapshot.speakerTypes[index] = speakerTypeFromParameterIndex(
                 handle->speakerTypeIndices[index].load(std::memory_order_relaxed));
         }
+        snapshot.listenerPosition.x = handle->listenerPositionX.load(std::memory_order_relaxed);
+        snapshot.listenerPosition.y = handle->listenerPositionY.load(std::memory_order_relaxed);
         snapshot.genericResponseTone = handle->genericResponseTone.load(std::memory_order_relaxed);
 
         const auto sequenceAfter = handle->sequence.load(std::memory_order_acquire);

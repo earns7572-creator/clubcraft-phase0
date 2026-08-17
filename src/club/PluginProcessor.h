@@ -55,7 +55,6 @@ private:
     void registerAsSource();
     void reconcileRole();
     void restoreLegacyPrimarySpeakerLevel(const juce::ValueTree& restoredState);
-    [[nodiscard]] clubcraft::PlanarPosition sourcePosition() const noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
     juce::String sessionId { "phase0-default-club" };

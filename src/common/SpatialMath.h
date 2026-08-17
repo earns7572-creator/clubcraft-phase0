@@ -32,6 +32,19 @@ struct StereoGains
     return { std::cos(angle), std::sin(angle) };
 }
 
+/**
+    Pan a Speaker from the Listener's point of view. A Speaker directly beside
+    the Listener reaches the corresponding hard side; a Speaker directly in
+    front or behind is centred in the stereo simulation.
+*/
+[[nodiscard]] inline StereoGains panForSpeakerAndListener(PlanarPosition speaker,
+                                                           PlanarPosition listener) noexcept
+{
+    constexpr float kMinimumDistance = 0.25f;
+    const auto relativeX = speaker.x - listener.x;
+    return constantPowerPan(relativeX / std::max(distance(speaker, listener), kMinimumDistance));
+}
+
 [[nodiscard]] inline float gainForRelativePath(float referencePath, float path) noexcept
 {
     constexpr float kMinimumPath = 0.25f;

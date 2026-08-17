@@ -50,21 +50,22 @@ public:
     }
 
     void render(juce::AudioBuffer<float>& buffer,
-                const RealtimeSceneSnapshot& scene,
-                PlanarPosition sourcePosition) noexcept
+                const RealtimeSceneSnapshot& scene) noexcept
     {
         if (buffer.getNumChannels() < 2 || monoDelayLine.empty())
             return;
 
         std::array<SpeakerPath, kSpeakerCount> paths;
-        constexpr PlanarPosition listener { 0.0f, 0.0f };
+        // Every SOURCE is fixed at the club stage origin. CLUB alone defines
+        // the speaker and listener geometry shared by all SOURCES.
+        constexpr PlanarPosition source { 0.0f, 0.0f };
+        const auto listener = scene.listenerPosition;
 
-        float maximumAbsX = 0.25f;
         float referencePath = 0.0f;
         for (std::size_t index = 0; index < kSpeakerCount; ++index)
         {
-            maximumAbsX = std::max(maximumAbsX, std::abs(scene.speakerPositions[index].x));
-            referencePath += 2.0f * spatial::distance(scene.speakerPositions[index], listener);
+            referencePath += spatial::distance(source, scene.speakerPositions[index])
+                + spatial::distance(scene.speakerPositions[index], listener);
         }
         referencePath /= static_cast<float>(kSpeakerCount);
 
@@ -72,7 +73,7 @@ public:
         for (std::size_t index = 0; index < kSpeakerCount; ++index)
         {
             auto& path = paths[index];
-            const auto sourceToSpeaker = spatial::distance(sourcePosition, scene.speakerPositions[index]);
+            const auto sourceToSpeaker = spatial::distance(source, scene.speakerPositions[index]);
             const auto speakerToListener = spatial::distance(scene.speakerPositions[index], listener);
             path.totalDistance = sourceToSpeaker + speakerToListener;
             shortestPath = std::min(shortestPath, path.totalDistance);
@@ -81,7 +82,7 @@ public:
                 / static_cast<float>(kSpeakerCount);
             path.responseTone = spatial::toneForRelativePath(
                 scene.genericResponseTone, referencePath, path.totalDistance);
-            path.pan = spatial::constantPowerPan(scene.speakerPositions[index].x / maximumAbsX);
+            path.pan = spatial::panForSpeakerAndListener(scene.speakerPositions[index], listener);
             path.type = scene.speakerTypes[index];
             speakerCharacters[index].setType(path.type);
         }

@@ -42,6 +42,7 @@ struct SceneSnapshot
         PlanarPosition { 6.0f, -6.0f },
     };
     float genericResponseTone = 1.0f;
+    PlanarPosition listenerPosition { 0.0f, 0.0f };
     std::array<SpeakerType, kSpeakerCount> speakerTypes {
         SpeakerType::fullRange,
         SpeakerType::fullRange,
@@ -63,6 +64,7 @@ struct RealtimeSceneSnapshot
         PlanarPosition { 6.0f, -6.0f },
     };
     float genericResponseTone = 1.0f;
+    PlanarPosition listenerPosition { 0.0f, 0.0f };
     std::array<SpeakerType, kSpeakerCount> speakerTypes {
         SpeakerType::fullRange,
         SpeakerType::fullRange,
@@ -97,6 +99,8 @@ struct SessionSlot
     std::array<std::atomic<float>, kSpeakerCount> speakerPositionX;
     std::array<std::atomic<float>, kSpeakerCount> speakerPositionY;
     std::array<std::atomic<int>, kSpeakerCount> speakerTypeIndices;
+    std::atomic<float> listenerPositionX { 0.0f };
+    std::atomic<float> listenerPositionY { 0.0f };
     std::atomic<float> genericResponseTone { 1.0f };
     std::atomic<bool> published { false };
 
