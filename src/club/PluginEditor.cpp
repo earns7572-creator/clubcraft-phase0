@@ -372,10 +372,6 @@ ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
     ClubCraftPhase0AudioProcessor& processorToUse)
     : AudioProcessorEditor(&processorToUse), pluginProcessor(processorToUse)
 {
-    setSize(1180, 820);
-    setResizable(true, true);
-    setResizeLimits(860, 620, 1600, 1200);
-
     titleLabel.setText("CLUB CRAFT", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(20.0f).withKerningFactor(0.18f));
     titleLabel.setColour(juce::Label::textColourId, kGraphite);
@@ -544,6 +540,12 @@ ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
     responseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         pluginProcessor.getParameters(), "genericResponseTone", responseSlider);
 
+    // setSize() may call resized() synchronously. All child Components,
+    // including the unique_ptr-owned FloorView and RoutingMatrix, now exist.
+    setResizable(true, true);
+    setResizeLimits(860, 620, 1600, 1200);
+    setSize(1180, 820);
+
     refreshStatus();
     refreshDynamicUi();
     startTimerHz(15);
@@ -592,7 +594,8 @@ void ClubCraftPhase0AudioProcessorEditor::resized()
 
     floorLabel.setBounds(left.removeFromTop(22));
     auto floorBounds = left.removeFromTop(std::max(230, left.getHeight() / 2));
-    floorView->setBounds(floorBounds);
+    if (floorView != nullptr)
+        floorView->setBounds(floorBounds);
     auto buttons = left.removeFromTop(34);
     addSpeakerButton.setBounds(buttons.removeFromLeft(118).reduced(2));
     deleteSpeakerButton.setBounds(buttons.removeFromLeft(146).reduced(2));
@@ -612,7 +615,11 @@ void ClubCraftPhase0AudioProcessorEditor::resized()
     selectedRouteGainLabel.setBounds(routeInspector.removeFromLeft(66));
     selectedRouteGain.setBounds(routeInspector.reduced(2));
     selectedRouteLabel.setBounds(right.removeFromTop(20));
-    matrixViewport.setBounds(right.withTrimmedTop(4));
+    // Viewport itself is a value member, but retaining this guard documents
+    // that it must not depend on a not-yet-created RoutingMatrix during future
+    // constructor changes.
+    if (routingMatrix != nullptr)
+        matrixViewport.setBounds(right.withTrimmedTop(4));
 }
 
 void ClubCraftPhase0AudioProcessorEditor::timerCallback()
