@@ -1,7 +1,7 @@
 #include "SceneCompiler.h"
 #include "SceneState.h"
+#include "TestCheck.h"
 
-#include <cassert>
 #include <string>
 #include <vector>
 
@@ -48,17 +48,17 @@ void testCompileOneToManyRoutes()
     clubcraft::CompiledScene compiled;
     const auto result = compiler.compile(scene, { "kick" }, 11, compiled);
 
-    assert(!result.hasError());
-    assert(compiled.realtimeScene.revision == 11);
-    assert(compiled.realtimeScene.activeSpeakerCount == 2);
-    assert(compiled.sourcePlans.contains("kick"));
+    CHECK(!result.hasError());
+    CHECK(compiled.realtimeScene.revision == 11);
+    CHECK(compiled.realtimeScene.activeSpeakerCount == 2);
+    CHECK(compiled.sourcePlans.contains("kick"));
 
     const auto& plan = compiled.sourcePlans.at("kick");
-    assert(plan.revision == 11);
-    assert(plan.routeCount == 2);
-    assert(plan.routes[0].inputMode == clubcraft::InputChannelMode::sumMono);
-    assert(plan.routes[0].linearGain == 1.0f);
-    assert(plan.routes[0].speakerSlot != plan.routes[1].speakerSlot);
+    CHECK(plan.revision == 11);
+    CHECK(plan.routeCount == 2);
+    CHECK(plan.routes[0].inputMode == clubcraft::InputChannelMode::sumMono);
+    CHECK(plan.routes[0].linearGain == 1.0f);
+    CHECK(plan.routes[0].speakerSlot != plan.routes[1].speakerSlot);
 }
 
 void testLegacyRoutesUseQuarterGain()
@@ -77,11 +77,11 @@ void testLegacyRoutesUseQuarterGain()
     clubcraft::CompiledScene compiled;
     const auto result = compiler.compile(scene, { "kick" }, 20, compiled);
 
-    assert(!result.hasError());
+    CHECK(!result.hasError());
     const auto& plan = compiled.sourcePlans.at("kick");
-    assert(plan.routeCount == 4);
+    CHECK(plan.routeCount == 4);
     for (std::size_t index = 0; index < plan.routeCount; ++index)
-        assert(plan.routes[index].linearGain == 0.25f);
+        CHECK(plan.routes[index].linearGain == 0.25f);
 }
 
 void testGenerationChangesWhenSlotIsReused()
@@ -91,24 +91,24 @@ void testGenerationChangesWhenSlotIsReused()
     clubcraft::DynamicScene firstScene;
     firstScene.speakers = { makeSpeaker("first") };
     firstScene.routes = { makeRoute("route-first", "source", "first") };
-    assert(!compiler.compile(firstScene, { "source" }, 1, firstCompiled).hasError());
+    CHECK(!compiler.compile(firstScene, { "source" }, 1, firstCompiled).hasError());
 
     const auto firstSlot = firstCompiled.sourcePlans.at("source").routes[0].speakerSlot;
     const auto firstGeneration = firstCompiled.sourcePlans.at("source").routes[0].speakerGeneration;
 
     clubcraft::CompiledScene removedCompiled;
     clubcraft::DynamicScene removedScene;
-    assert(!compiler.compile(removedScene, { "source" }, 2, removedCompiled).hasError());
+    CHECK(!compiler.compile(removedScene, { "source" }, 2, removedCompiled).hasError());
 
     clubcraft::CompiledScene secondCompiled;
     clubcraft::DynamicScene secondScene;
     secondScene.speakers = { makeSpeaker("second") };
     secondScene.routes = { makeRoute("route-second", "source", "second") };
-    assert(!compiler.compile(secondScene, { "source" }, 3, secondCompiled).hasError());
+    CHECK(!compiler.compile(secondScene, { "source" }, 3, secondCompiled).hasError());
 
     const auto& secondRoute = secondCompiled.sourcePlans.at("source").routes[0];
-    assert(secondRoute.speakerSlot == firstSlot);
-    assert(secondRoute.speakerGeneration > firstGeneration);
+    CHECK(secondRoute.speakerSlot == firstSlot);
+    CHECK(secondRoute.speakerGeneration > firstGeneration);
 }
 
 void testSceneStateRoundTrip()
@@ -125,14 +125,14 @@ void testSceneStateRoundTrip()
 
     const auto tree = clubcraft::scene_state::toValueTree(original);
     const auto restored = clubcraft::scene_state::fromValueTree(tree);
-    assert(restored.has_value());
-    assert(restored->speakers.size() == 1);
-    assert(restored->routes.size() == 1);
-    assert(restored->speakers[0].stableId == "speaker-a");
-    assert(restored->speakers[0].type == clubcraft::SpeakerType::woofer);
-    assert(restored->routes[0].sourceId == "source-a");
-    assert(restored->legacyDefaultRouting);
-    assert(restored->legacyRouteGain == 0.25f);
+    CHECK(restored.has_value());
+    CHECK(restored->speakers.size() == 1);
+    CHECK(restored->routes.size() == 1);
+    CHECK(restored->speakers[0].stableId == "speaker-a");
+    CHECK(restored->speakers[0].type == clubcraft::SpeakerType::woofer);
+    CHECK(restored->routes[0].sourceId == "source-a");
+    CHECK(restored->legacyDefaultRouting);
+    CHECK(restored->legacyRouteGain == 0.25f);
 }
 
 void testCapacityAndReferenceErrors()
@@ -144,7 +144,7 @@ void testCapacityAndReferenceErrors()
     for (std::size_t index = 0; index < clubcraft::kMaxSpeakers + 1; ++index)
         tooManySpeakers.speakers.push_back(makeSpeaker("speaker-" + std::to_string(index)));
     auto result = compiler.compile(tooManySpeakers, { "source" }, 1, compiled);
-    assert(result.code == clubcraft::SceneCompileErrorCode::tooManySpeakers);
+    CHECK(result.code == clubcraft::SceneCompileErrorCode::tooManySpeakers);
 
     clubcraft::DynamicScene tooManyGlobalRoutes;
     tooManyGlobalRoutes.speakers = { makeSpeaker("speaker") };
@@ -152,13 +152,13 @@ void testCapacityAndReferenceErrors()
         tooManyGlobalRoutes.routes.push_back(makeRoute(
             "global-route-" + std::to_string(index), "source", "speaker"));
     result = compiler.compile(tooManyGlobalRoutes, { "source" }, 2, compiled);
-    assert(result.code == clubcraft::SceneCompileErrorCode::tooManyRoutes);
+    CHECK(result.code == clubcraft::SceneCompileErrorCode::tooManyRoutes);
 
     clubcraft::DynamicScene missingSpeaker;
     missingSpeaker.speakers = { makeSpeaker("known") };
     missingSpeaker.routes = { makeRoute("missing", "source", "unknown") };
     result = compiler.compile(missingSpeaker, { "source" }, 3, compiled);
-    assert(result.code == clubcraft::SceneCompileErrorCode::speakerNotFound);
+    CHECK(result.code == clubcraft::SceneCompileErrorCode::speakerNotFound);
 
     clubcraft::DynamicScene tooManyRoutesForSource;
     tooManyRoutesForSource.speakers = { makeSpeaker("speaker") };
@@ -166,7 +166,7 @@ void testCapacityAndReferenceErrors()
         tooManyRoutesForSource.routes.push_back(makeRoute(
             "route-" + std::to_string(index), "source", "speaker"));
     result = compiler.compile(tooManyRoutesForSource, { "source" }, 4, compiled);
-    assert(result.code == clubcraft::SceneCompileErrorCode::tooManyRoutesForSource);
+    CHECK(result.code == clubcraft::SceneCompileErrorCode::tooManyRoutesForSource);
 }
 
 } // namespace

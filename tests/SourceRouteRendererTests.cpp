@@ -1,6 +1,6 @@
 #include "SourceRouteStereoRenderer.h"
+#include "TestCheck.h"
 
-#include <cassert>
 #include <cmath>
 
 namespace
@@ -60,7 +60,7 @@ void runSourceRouteRendererTests()
 {
     const auto oneRoutePeak = renderPeak(1);
     const auto twoRoutePeak = renderPeak(2);
-    assert(oneRoutePeak > 0.0f);
+    CHECK(oneRoutePeak > 0.0f);
     // New Dynamic Scene routes deliberately do not divide output by speaker count.
-    assert(twoRoutePeak > oneRoutePeak * 1.8f);
+    CHECK(twoRoutePeak > oneRoutePeak * 1.8f);
 }

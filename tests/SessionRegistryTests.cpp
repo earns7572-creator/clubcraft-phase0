@@ -2,9 +2,9 @@
 #include "SpatialMath.h"
 #include "SpeakerType.h"
 #include "SpeakerCharacterResponse.h"
+#include "TestCheck.h"
 
 #include <array>
-#include <cassert>
 #include <cmath>
 #include <iostream>
 #include <numbers>
@@ -18,7 +18,7 @@ constexpr float kTolerance = 0.0001f;
 
 void assertNear(float actual, float expected)
 {
-    assert(std::abs(actual - expected) < kTolerance);
+    CHECK(std::abs(actual - expected) < kTolerance);
 }
 
 void testSpatialSceneSnapshotPublication()
@@ -27,8 +27,8 @@ void testSpatialSceneSnapshotPublication()
     registry.resetForTests();
 
     const auto handle = registry.acquireSession("test-club");
-    assert(handle != nullptr);
-    assert(!clubcraft::SessionRegistry::readSnapshot(handle).has_value());
+    CHECK(handle != nullptr);
+    CHECK(!clubcraft::SessionRegistry::readSnapshot(handle).has_value());
 
     registry.publishSnapshot({
         .sessionId = "test-club",
@@ -52,8 +52,8 @@ void testSpatialSceneSnapshotPublication()
     });
 
     const auto published = clubcraft::SessionRegistry::readSnapshot(handle);
-    assert(published.has_value());
-    assert(published->revision == 7);
+    CHECK(published.has_value());
+    CHECK(published->revision == 7);
     assertNear(published->masterLinearGain, 0.5011872f);
     assertNear(published->speakerLinearGains[0], 1.0f);
     assertNear(published->speakerLinearGains[1], 0.5011872f);
@@ -66,25 +66,25 @@ void testSpatialSceneSnapshotPublication()
     assertNear(published->genericResponseTone, 0.35f);
     assertNear(published->listenerPosition.x, 2.5f);
     assertNear(published->listenerPosition.y, -3.0f);
-    assert(published->speakerTypes[0] == clubcraft::SpeakerType::sub);
-    assert(published->speakerTypes[1] == clubcraft::SpeakerType::woofer);
-    assert(published->speakerTypes[2] == clubcraft::SpeakerType::mid);
-    assert(published->speakerTypes[3] == clubcraft::SpeakerType::high);
+    CHECK(published->speakerTypes[0] == clubcraft::SpeakerType::sub);
+    CHECK(published->speakerTypes[1] == clubcraft::SpeakerType::woofer);
+    CHECK(published->speakerTypes[2] == clubcraft::SpeakerType::mid);
+    CHECK(published->speakerTypes[3] == clubcraft::SpeakerType::high);
 }
 
 void testSpeakerTypeMapping()
 {
     using namespace clubcraft;
 
-    assert(speakerTypeFromParameterIndex(0) == SpeakerType::sub);
-    assert(speakerTypeFromParameterIndex(1) == SpeakerType::woofer);
-    assert(speakerTypeFromParameterIndex(2) == SpeakerType::fullRange);
-    assert(speakerTypeFromParameterIndex(3) == SpeakerType::mid);
-    assert(speakerTypeFromParameterIndex(4) == SpeakerType::high);
-    assert(speakerTypeFromParameterIndex(-1) == SpeakerType::fullRange);
-    assert(speakerTypeFromParameterIndex(999) == SpeakerType::fullRange);
-    assert(speakerTypeToParameterIndex(SpeakerType::fullRange) == 2);
-    assert(speakerTypeName(SpeakerType::high) == "HIGH");
+    CHECK(speakerTypeFromParameterIndex(0) == SpeakerType::sub);
+    CHECK(speakerTypeFromParameterIndex(1) == SpeakerType::woofer);
+    CHECK(speakerTypeFromParameterIndex(2) == SpeakerType::fullRange);
+    CHECK(speakerTypeFromParameterIndex(3) == SpeakerType::mid);
+    CHECK(speakerTypeFromParameterIndex(4) == SpeakerType::high);
+    CHECK(speakerTypeFromParameterIndex(-1) == SpeakerType::fullRange);
+    CHECK(speakerTypeFromParameterIndex(999) == SpeakerType::fullRange);
+    CHECK(speakerTypeToParameterIndex(SpeakerType::fullRange) == 2);
+    CHECK(speakerTypeName(SpeakerType::high) == "HIGH");
 }
 
 float rmsForSpeakerType(clubcraft::SpeakerType type, float frequencyHz)
@@ -117,11 +117,11 @@ void testSpeakerCharacterResponses()
 
     const auto subAt70Hz = rmsForSpeakerType(SpeakerType::sub, 70.0f);
     const auto subAt4kHz = rmsForSpeakerType(SpeakerType::sub, 4000.0f);
-    assert(subAt70Hz > subAt4kHz * 10.0f);
+    CHECK(subAt70Hz > subAt4kHz * 10.0f);
 
     const auto highAt100Hz = rmsForSpeakerType(SpeakerType::high, 100.0f);
     const auto highAt6kHz = rmsForSpeakerType(SpeakerType::high, 6000.0f);
-    assert(highAt6kHz > highAt100Hz * 10.0f);
+    CHECK(highAt6kHz > highAt100Hz * 10.0f);
 
     const auto fullRangeAt100Hz = rmsForSpeakerType(SpeakerType::fullRange, 100.0f);
     const auto fullRangeAt6kHz = rmsForSpeakerType(SpeakerType::fullRange, 6000.0f);
@@ -166,14 +166,14 @@ void testSpatialMath()
     assertNear(directlyInFront.right, 0.70710678f);
 
     const auto listenerMovedRightAndForward = spatial::panForSpeakerAndListener({ 6.0f, 0.0f }, { 4.0f, 4.0f });
-    assert(listenerMovedRightAndForward.left > rightOfListener.left + 0.1f);
-    assert(listenerMovedRightAndForward.right < rightOfListener.right - 0.05f);
+    CHECK(listenerMovedRightAndForward.left > rightOfListener.left + 0.1f);
+    CHECK(listenerMovedRightAndForward.right < rightOfListener.right - 0.05f);
 
     assertNear(spatial::gainForRelativePath(12.0f, 12.0f), 1.0f);
     assertNear(spatial::gainForRelativePath(12.0f, 24.0f), 0.5f);
     assertNear(spatial::relativeDelaySeconds(12.0f, 12.0f), 0.0f);
-    assert(spatial::relativeDelaySeconds(24.0f, 12.0f) > 0.0f);
-    assert(spatial::relativeDelaySeconds(1000.0f, 0.0f) <= spatial::kMaximumRelativeDelaySeconds);
+    CHECK(spatial::relativeDelaySeconds(24.0f, 12.0f) > 0.0f);
+    CHECK(spatial::relativeDelaySeconds(1000.0f, 0.0f) <= spatial::kMaximumRelativeDelaySeconds);
 }
 
 void testDynamicSceneAndRoutePlanPublication()
@@ -182,8 +182,8 @@ void testDynamicSceneAndRoutePlanPublication()
     registry.resetForTests();
 
     const auto publisher = registry.registerClubPublisher("dynamic-session", 101);
-    assert(publisher.authoritative);
-    assert(!publisher.conflict);
+    CHECK(publisher.authoritative);
+    CHECK(!publisher.conflict);
 
     const auto sourceResult = registry.registerSource({
         .sourceId = "kick",
@@ -192,7 +192,7 @@ void testDynamicSceneAndRoutePlanPublication()
         .heartbeat = 1,
         .runtimeInstanceToken = 201,
     });
-    assert(sourceResult.accepted());
+    CHECK(sourceResult.accepted());
 
     clubcraft::RealtimeSceneSnapshot scene;
     scene.revision = 55;
@@ -205,12 +205,12 @@ void testDynamicSceneAndRoutePlanPublication()
         .position = { -4.0f, 3.0f },
     };
 
-    assert(registry.publishRealtimeScene("dynamic-session", 101, scene));
+    CHECK(registry.publishRealtimeScene("dynamic-session", 101, scene));
     const auto sceneHandle = registry.acquireDynamicSession("dynamic-session");
     const auto publishedScene = clubcraft::SessionRegistry::readRealtimeScene(sceneHandle);
-    assert(publishedScene.has_value());
-    assert(publishedScene->revision == 55);
-    assert(publishedScene->speakers[0].generation == 3);
+    CHECK(publishedScene.has_value());
+    CHECK(publishedScene->revision == 55);
+    CHECK(publishedScene->speakers[0].generation == 3);
     assertNear(publishedScene->speakers[0].linearGain, 0.5f);
 
     clubcraft::SourceRoutePlan plan;
@@ -225,13 +225,13 @@ void testDynamicSceneAndRoutePlanPublication()
         .linearGain = 1.0f,
     };
 
-    assert(registry.publishSourceRoutePlan("dynamic-session", 101, "kick", plan));
+    CHECK(registry.publishSourceRoutePlan("dynamic-session", 101, "kick", plan));
     const auto routeHandle = registry.acquireSourceRoute("dynamic-session", "kick");
     const auto publishedPlan = clubcraft::SessionRegistry::readSourceRoutePlan(routeHandle);
-    assert(publishedPlan.has_value());
-    assert(publishedPlan->revision == 55);
-    assert(publishedPlan->routeCount == 1);
-    assert(publishedPlan->routes[0].speakerGeneration == 3);
+    CHECK(publishedPlan.has_value());
+    CHECK(publishedPlan->revision == 55);
+    CHECK(publishedPlan->routeCount == 1);
+    CHECK(publishedPlan->routes[0].speakerGeneration == 3);
 
     const auto duplicateSource = registry.registerSource({
         .sourceId = "kick",
@@ -240,7 +240,7 @@ void testDynamicSceneAndRoutePlanPublication()
         .heartbeat = 2,
         .runtimeInstanceToken = 202,
     });
-    assert(duplicateSource.requiresRekey());
+    CHECK(duplicateSource.requiresRekey());
 
     const auto otherSessionSource = registry.registerSource({
         .sourceId = "kick",
@@ -249,13 +249,13 @@ void testDynamicSceneAndRoutePlanPublication()
         .heartbeat = 3,
         .runtimeInstanceToken = 203,
     });
-    assert(otherSessionSource.accepted());
+    CHECK(otherSessionSource.accepted());
 
     const auto conflictingClub = registry.registerClubPublisher("dynamic-session", 102);
-    assert(!conflictingClub.authoritative);
-    assert(conflictingClub.conflict);
-    assert(registry.hasClubConflict("dynamic-session"));
-    assert(!registry.publishRealtimeScene("dynamic-session", 102, scene));
+    CHECK(!conflictingClub.authoritative);
+    CHECK(conflictingClub.conflict);
+    CHECK(registry.hasClubConflict("dynamic-session"));
+    CHECK(!registry.publishRealtimeScene("dynamic-session", 102, scene));
 }
 
 void testSourceLifecycle()
@@ -270,17 +270,17 @@ void testSourceLifecycle()
         .position = { 2.0f, -3.0f },
         .heartbeat = 42,
     });
-    assert(sourceRegistration.accepted());
+    CHECK(sourceRegistration.accepted());
 
     const auto source = registry.getSource("kick-source");
-    assert(source.has_value());
-    assert(source->displayName == "Kick");
+    CHECK(source.has_value());
+    CHECK(source->displayName == "Kick");
     assertNear(source->position.x, 2.0f);
     assertNear(source->position.y, -3.0f);
-    assert(source->heartbeat == 42);
+    CHECK(source->heartbeat == 42);
 
     registry.unregisterSource("kick-source");
-    assert(!registry.getSource("kick-source").has_value());
+    CHECK(!registry.getSource("kick-source").has_value());
 }
 }
 
