@@ -140,3 +140,96 @@ NaN、Inf、負のgain、無効なdB値はcontrol-sideでrejectする。
 ## 0.7.0 GO条件
 
 上記Gate A〜Hを`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`へ反映し、ChatGPTが修正版をレビューして**GO**と判断してから、Processor editing APIとtransaction testsに着手する。
+
+## Gate I — APVTS callbackはSceneを編集しない
+
+`AudioProcessorValueTreeState::Listener::parameterChanged()`は、audio callbackから同期的に呼ばれ得る。したがって、0.7.0ではこのcallbackからDynamicSceneを直接編集しない。
+
+| 場所 | 許可する処理 | 禁止する処理 |
+|---|---|---|
+| `parameterChanged()` | legacy parameterごとのatomic pending value書込み、atomic dirty bit設定 | mutex、string、vector検索、UUID、ValueTree、SceneCompiler、Registry、Host通知 |
+| Timer / AsyncUpdater（message thread） | pending automation取得、Stable ID検索、candidate transaction、APVTS mirror、compile / publish schedule | audio buffer処理 |
+| `processBlock()` | 固定容量snapshotとRoutePlan読出しだけ | すべてのcontrol-side操作 |
+
+### Pending automation mailbox
+
+- 最初の4 legacy SpeakerのLevel、Type、X、YとListener、Master、Response Toneについて、atomic pending valueとdirty bitを持つ。
+- callbackはpending valueをstoreしてdirty bitをsetするだけで終了する。
+- Timerはpending bitを交換して取得し、Stable ID `legacy-speaker-N`でcandidate Sceneへ適用する。
+- Floor Viewからlegacy Speakerを編集した時は、DynamicScene commit後にAPVTSをmirrorできる。ただしcallbackで同値pendingを受け取っても、TimerはScene値と比較してno-opにする。
+- `isSynchronisingLegacyMirror`は補助guardに留め、正しさをguardだけへ依存しない。
+
+## Gate J — Revision付きcandidate transaction
+
+DynamicSceneはcontrol-side revisionを持つ。すべての編集APIはrevisionを使ったcompare-and-swap型transactionにする。
+
+```text
+lock sceneEditMutex
+copy authoritative Scene + baseSceneRevision
+unlock
+apply edit to candidate
+validate / preflight candidate
+lock sceneEditMutex
+if authoritative revision != baseSceneRevision:
+    unlock
+    retry / rebase candidate from newest Scene
+else:
+    swap candidate into authoritative Scene
+    ++authoritative revision
+    sceneDirty = true
+    unlock
+```
+
+- stale candidateはswapしてはならない。
+- retry上限を設け、上限超過時はUIへ編集失敗を通知しauthoritative Sceneを保持する。
+- `sourceMembershipRevision`も別atomicで管理する。legacy materialisation dialogは対象Source ID一覧とmembership revisionをsnapshotし、commit時に変更があれば再確認または指定一覧だけを変換する。0.7.0は後者を採用し、ダイアログに「現在表示中のN Sourcesを変換」と明示する。
+
+## Gate K — Persistent Route realtime slot / generation
+
+`RouteConfig.stableId`をcontrol-side identityとし、CompilerはStable Route IDを固定容量の`routeSlot + routeGeneration`へ対応させる。
+
+| 操作 | routeSlot / routeGeneration |
+|---|---|
+| 既存Stable Routeを再compile | 同じslot、同じgenerationを維持する。 |
+| Routeを削除 | slotをinactiveにする。generationは保持する。 |
+| 新しいRouteが空きslotを再利用 | generationをincrementする。 |
+| plan内の並び順だけが変わる | Route identityは変えない。 |
+
+Rendererのgain smoother、mute ramp、将来のBand filter stateは`routeSlot + routeGeneration`に紐付ける。RoutePlan配列indexに紐付けてはならない。
+
+### Muteの実装境界
+
+- `enabled=false`は保存上のmute状態を表す。
+- Rendererではdisabled Routeを即skipせず、target gainを0にして10ms rampが完了するまでVoice stateを処理する。
+- Speaker muteも同じ方式でtarget speaker gainを0へrampする。
+- 0 routeの新revisionは有効なPlanであり、古い`lastGoodRoutePlan`を継続処理してはならない。
+
+## Gate L — 正本文書の同期
+
+0.7.0の実装開始前に、以下を必ず同一仕様へ更新する。
+
+| 文書 | 必須更新 |
+|---|---|
+| `PHASE7_PLAN.md` | 2048 Route、pending automation、revision transaction、Route slot lifecycle、追加テストを反映する。 |
+| `CHATGPT_HANDOFF.md` | 0.7でFloor View、Listener drag、Full Routingを実装する新ロードマップへ更新し、旧0.8 / 0.10分割と512 Routeを削除する。 |
+| `CHATGPT_PROMPTS.md` | 0.7 Gateと2048 Route、pending automation、revision transactionを明示し、0.6専用の512 Route前提を削除する。 |
+| `README.md` | `ARCHITECTURE_GATE_0_7.md`を0.7の唯一の実装判断正本として示す。 |
+
+## Gate M — 再レビューで追加された必須テスト
+
+Gate Hのテストに、以下を追加する。
+
+1. APVTS parameter callbackがScene mutex、vector、stringを触らずatomic mailboxだけを更新する。
+2. pending automationがmessage threadで正しいlegacy Stable IDへ適用される。
+3. UI edit → APVTS mirror → callbackで無限更新が起きない。
+4. candidate作成後にScene revisionが変わった時、stale candidateがswapされずretry / rebaseされる。
+5. materialisation dialog中のSOURCE register / rekeyに対し、snapshot対象Sourceだけを安全に変換する。
+6. RoutePlanの並び替えでsmootherが別Routeへ移らない。
+7. Route slot再利用でgenerationが変わり、旧DSP stateを再利用しない。
+8. Route muteとSpeaker muteが10ms ramp後にsilentになり、clickを出さない。
+9. gain 0、NaN、Inf、負のgainがUIまたはDSPへ入らない。
+10. pending automation中にHost state保存しても、保存Stateが矛盾しない。
+
+## 更新後のGO条件
+
+Gate A〜Mを`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEへ同期し、`CHATGPT_REVIEW_PROMPT_0_7_FINAL.md`による最終レビューでGOを得るまで、0.7.0のコード実装は開始しない。

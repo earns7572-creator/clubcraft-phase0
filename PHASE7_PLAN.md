@@ -184,3 +184,36 @@ Floor Viewの`RESET LAYOUT`は`RESET POSITIONS`へ改名し、SpeakerまたはRo
 4. 60〜120Hzのdrag eventでもcompile / publishが30Hzを超えず、mouseUpで最終位置が即時publishされる。
 5. duplicate CLUBではScene編集がread-onlyになり、owner消滅後に次CLUBが編集可能になる。
 6. Debug / Release CTest、VST3 / AU、Intel Mac / Ableton Live試用を通過する。
+
+## 再々レビュー反映 — Gate I〜Mの最終必須条件
+
+`ARCHITECTURE_GATE_0_7.md`にGate I〜Mを追加した。0.7.0では次の条件を満たすまでコード実装を開始しない。
+
+| 最終ブロッカー | 確定した対応 |
+|---|---|
+| APVTS automation callback | `parameterChanged()`はatomic pending valueとdirty bitだけを更新する。DynamicScene、mutex、vector、string、Compiler、Registryを触らない。Timer / AsyncUpdaterがmessage threadでpendingをStable ID基準に適用する。 |
+| stale candidate | candidate Sceneは`baseSceneRevision`を持つ。swap直前にauthoritative revisionを比較し、不一致ならretry / rebaseする。 |
+| Route identity | Stable Route IDをpersistent `routeSlot + routeGeneration`へコンパイルする。planの並び順ではDSP stateを識別しない。 |
+| mute ramp | `enabled=false`を即skipせずtarget gain=0とし、fade完了までVoiceを処理する。Speaker muteも同様。 |
+| 正本文書 | `CHATGPT_HANDOFF.md`と`CHATGPT_PROMPTS.md`を2048 Route、0.7 Full Routing / Listener drag、Gate I〜Mへ同期する。 |
+
+### 修正版の容量・ロードマップ
+
+| 項目 | 0.7.0の正しい値 |
+|---|---:|
+| `MAX_SPEAKERS` | 16 |
+| `MAX_SOURCES` | 128 |
+| `MAX_ROUTES_PER_SOURCE` | 16 |
+| `MAX_ROUTES_GLOBAL` | **2048** |
+| 0.7.0で実装する操作 | Floor View、Speaker add / delete / drag、Listener drag、Full Route Matrix、route gain / mute、legacy materialisation |
+| 0.7.0で実装しない操作 | Band DSP、HRTF、完成版Binaural、4ch / 8ch本出力、RTA |
+
+### 追加テスト
+
+- APVTS callbackがatomic mailbox以外に触れない。
+- pending automationがmessage threadで正しいlegacy Stable IDへ反映される。
+- stale candidateはswapされない。
+- Route reorder / route slot reuseでsmootherが別Routeへ移らない。
+- mute ramp、gain 0、NaN / Inf reject、pending automation中state保存を検証する。
+
+> 実装開始の唯一の承認条件は、`ARCHITECTURE_GATE_0_7.md`のGate A〜Mが最終レビューでGOとなることである。

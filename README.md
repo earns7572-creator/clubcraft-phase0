@@ -129,4 +129,4 @@ SOURCEはクラブのステージ原点に固定されます。CLUBでは各Spea
 
 ## 0.7.0 Dynamic Speaker & Routing UI 計画
 
-次の開発段階では、最大16 Speakerの追加・削除・自由配置、Listenerの2D配置、SOURCE→SpeakerのFull Route作成・削除・mute・gain操作を導入します。初版の操作計画は [PHASE7_PLAN.md](PHASE7_PLAN.md) ですが、実装判断の正本はChatGPTレビューを反映した [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) です。初回レビュー依頼は [CHATGPT_REVIEW_PROMPT_0_7.md](CHATGPT_REVIEW_PROMPT_0_7.md)、修正版Gateの再レビュー依頼は [CHATGPT_REVIEW_PROMPT_0_7_REVISED.md](CHATGPT_REVIEW_PROMPT_0_7_REVISED.md) を使用してください。
+次の開発段階では、最大16 Speakerの追加・削除・自由配置、Listenerの2D配置、SOURCE→SpeakerのFull Route作成・削除・mute・gain操作を導入します。初版の操作計画は [PHASE7_PLAN.md](PHASE7_PLAN.md) ですが、実装判断の正本はChatGPTレビューを反映した [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) です。初回レビュー依頼は [CHATGPT_REVIEW_PROMPT_0_7.md](CHATGPT_REVIEW_PROMPT_0_7.md)、修正版Gateの再レビュー依頼は [CHATGPT_REVIEW_PROMPT_0_7_REVISED.md](CHATGPT_REVIEW_PROMPT_0_7_REVISED.md)、Gate A〜M同期後の最終GO判定は [CHATGPT_REVIEW_PROMPT_0_7_FINAL.md](CHATGPT_REVIEW_PROMPT_0_7_FINAL.md) を使用してください。

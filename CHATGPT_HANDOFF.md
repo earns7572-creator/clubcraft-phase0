@@ -491,28 +491,21 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 
 0.6.0で実施する`OUTPUT_FEASIBILITY_SPIKE.md`の結果をArchitecture Decision Recordとして確定する。VST3 / AUとAbleton Live / Logic Pro / ReaperにおけるStereo、Quad、8ch、Preview + Aux出力のbus negotiationを確認し、その結果が出るまでSOURCE audioの最終multi-channel aggregation方式を決め打ちしない。
 
-### 0.7.0 — Dynamic Speaker Scene
+### 0.7.0 — Dynamic Speaker, Full Routing & Listener UI
 
-- Speaker add/remove
-- Speaker IDs
-- Generic types
-- individual X/Y
-- individual levels
-- Pair add
-- venue presets
-- Top View UI
+0.7.0では、0.6.0のDynamic Sceneをユーザー操作へ公開する。唯一の実装判断正本は [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) であり、Gate A〜Mの最終GOなしにコードを書かない。
 
-### 0.8.0 — Source Routing
+- 最大16 Speakerのadd/remove、Type、Level、X/Y、mute
+- Floor View上のSpeaker dragとListener drag
+- SOURCE一覧、offline source表示、virtualized Routing Matrix
+- SOURCE→Speakerのone-to-many Full + SUM_MONO Route create/delete/mute/gain
+- legacy implicit 0.25 Routeの確認付きmaterialisation
+- DynamicScene authoritative、legacy APVTS pending mailbox、Stable ID bridge
+- revision付きcandidate transaction、30Hz drag publish、mouseUp即時publish
+- 2048 global Route、persistent route slot + generation、gain / mute smoothing
+- duplicate CLUB read-only、duplicate SOURCE rekey
 
-- SOURCE registration
-- source list
-- show/hide
-- source icon/name
-- drag SOURCE → Speaker
-- one-to-many routes
-- Full Signal routing
-
-### 0.9.0 — Band Routing + System Balance
+### 0.8.0 — Band Routing + System Balance
 
 - FULL / BAND route
 - band low/high
@@ -521,10 +514,9 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 - group + individual speaker level
 - Speaker activity visualization
 
-### 0.10.0 — Listener + Binaural Preview
+### 0.9.0 — Binaural Preview
 
-- draggable Listener
-- stereo preview
+- stereo previewの改善
 - real binaural/HRTF research and implementation
 - front/rear/distance
 - Z/height modelを入れるならここで設計
@@ -577,10 +569,12 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 5. SOURCE→Speaker audio routingをどう実装するか提案
 6. Stereo/Binaural previewと4/8ch discrete outputの責務分離を提案
 7. APVTS / state migration方針を提案
-8. V1上限として `MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_GLOBAL=512`、`MAX_ROUTES_PER_SOURCE=16` を前提に、overflowをcontrol側でrejectする設計を確認
-9. 変更対象ファイル一覧を提示
-10. [ARCHITECTURE_GATE_0_6.md](ARCHITECTURE_GATE_0_6.md) のGate A〜Hを満たす設計を提示する
-11. その設計を承認されるまでコードを書かない
+8. 0.7.0上限として `MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_GLOBAL=2048`、`MAX_ROUTES_PER_SOURCE=16` を前提に、overflowをcontrol側でrejectする設計を確認
+9. 0.7.0では`parameterChanged()`がatomic pending mailboxだけを更新し、message threadがStable ID基準でDynamicSceneへ適用する設計を確認
+10. revision付きcandidate transaction、route slot + generation、gain / mute smoothing、legacy materialisation rollbackを確認
+11. 変更対象ファイル一覧を提示
+12. [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) のGate A〜Mを満たす設計を提示する
+13. その設計を承認されるまでコードを書かない
 
 ---
 
