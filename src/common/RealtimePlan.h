@@ -26,6 +26,10 @@ struct RealtimeSpeaker
 struct CompiledRoute
 {
     bool enabled = false;
+    // Persistent control-side Route identity. These values are distinct from
+    // speakerSlot/generation and remain stable when a RoutePlan is reordered.
+    std::uint16_t routeSlot = 0;
+    std::uint32_t routeGeneration = 0;
     std::uint16_t speakerSlot = 0;
     std::uint32_t speakerGeneration = 0;
     RouteMode mode = RouteMode::full;

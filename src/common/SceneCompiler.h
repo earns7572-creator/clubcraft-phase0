@@ -63,6 +63,7 @@ private:
     [[nodiscard]] static SceneCompileError error(SceneCompileErrorCode code, const char* message);
 
     std::array<SlotAssignment, kMaxSpeakers> assignments {};
+    std::array<SlotAssignment, kMaxRoutesGlobal> routeAssignments {};
 };
 
 } // namespace clubcraft

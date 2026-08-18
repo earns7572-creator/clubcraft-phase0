@@ -482,6 +482,8 @@ bool SessionRegistry::publishSourceRoutePlan(const std::string& sessionId,
         const auto isActiveRoute = index < plan.routeCount;
         const auto route = isActiveRoute ? plan.routes[index] : CompiledRoute {};
         slot->enabled[index].store(isActiveRoute && route.enabled, std::memory_order_relaxed);
+        slot->routeSlot[index].store(route.routeSlot, std::memory_order_relaxed);
+        slot->routeGeneration[index].store(route.routeGeneration, std::memory_order_relaxed);
         slot->speakerSlot[index].store(route.speakerSlot, std::memory_order_relaxed);
         slot->speakerGeneration[index].store(route.speakerGeneration, std::memory_order_relaxed);
         slot->modeIndices[index].store(static_cast<int>(route.mode), std::memory_order_relaxed);
@@ -516,6 +518,8 @@ std::optional<SourceRoutePlan> SessionRegistry::readSourceRoutePlan(const Source
         {
             auto& route = plan.routes[index];
             route.enabled = handle->enabled[index].load(std::memory_order_relaxed);
+            route.routeSlot = handle->routeSlot[index].load(std::memory_order_relaxed);
+            route.routeGeneration = handle->routeGeneration[index].load(std::memory_order_relaxed);
             route.speakerSlot = handle->speakerSlot[index].load(std::memory_order_relaxed);
             route.speakerGeneration = handle->speakerGeneration[index].load(std::memory_order_relaxed);
             route.mode = static_cast<RouteMode>(handle->modeIndices[index].load(std::memory_order_relaxed));

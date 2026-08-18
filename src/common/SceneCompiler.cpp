@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -15,6 +16,11 @@ constexpr std::size_t kLegacySpeakerRouteCount = 4;
 [[nodiscard]] bool contains(const std::vector<std::string>& values, const std::string& value)
 {
     return std::find(values.begin(), values.end(), value) != values.end();
+}
+
+[[nodiscard]] std::string legacyRouteStableId(const std::string& sourceId, const std::string& speakerId)
+{
+    return "legacy-route:" + sourceId + ":" + speakerId;
 }
 }
 
@@ -44,6 +50,14 @@ SceneCompileError SceneCompiler::compile(const DynamicScene& scene,
     {
         if (!routeIds.insert(route.stableId).second)
             return error(SceneCompileErrorCode::duplicateRouteId, "Route Stable IDs must be unique.");
+    }
+
+    std::vector<std::string> uniqueSources;
+    uniqueSources.reserve(activeSourceIds.size());
+    for (const auto& sourceId : activeSourceIds)
+    {
+        if (!contains(uniqueSources, sourceId))
+            uniqueSources.push_back(sourceId);
     }
 
     // Remove only stale control-side identifiers. Generation is retained so a
@@ -83,6 +97,47 @@ SceneCompileError SceneCompiler::compile(const DynamicScene& scene,
         slotForSpeaker.emplace(speaker.stableId, slot);
     }
 
+    std::unordered_set<std::string> activeRouteIds;
+    if (scene.legacyDefaultRouting)
+    {
+        const auto legacySpeakerCount = std::min(kLegacySpeakerRouteCount, scene.speakers.size());
+        for (const auto& sourceId : uniqueSources)
+            for (std::size_t index = 0; index < legacySpeakerCount; ++index)
+                activeRouteIds.insert(legacyRouteStableId(sourceId, scene.speakers[index].stableId));
+    }
+    else
+    {
+        activeRouteIds = routeIds;
+    }
+
+    for (auto& assignment : routeAssignments)
+    {
+        if (!assignment.stableId.empty() && !activeRouteIds.contains(assignment.stableId))
+            assignment.stableId.clear();
+    }
+
+    const auto routeIdentityFor = [this](const std::string& stableId)
+        -> std::optional<std::pair<std::uint16_t, std::uint32_t>>
+    {
+        auto assignment = std::find_if(routeAssignments.begin(), routeAssignments.end(),
+                                       [&stableId](const SlotAssignment& item) { return item.stableId == stableId; });
+        if (assignment == routeAssignments.end())
+        {
+            assignment = std::find_if(routeAssignments.begin(), routeAssignments.end(),
+                                      [](const SlotAssignment& item) { return item.stableId.empty(); });
+            if (assignment == routeAssignments.end())
+                return std::nullopt;
+
+            assignment->stableId = stableId;
+            assignment->generation = std::max<std::uint32_t>(1, assignment->generation + 1);
+        }
+
+        return std::pair {
+            static_cast<std::uint16_t>(std::distance(routeAssignments.begin(), assignment)),
+            assignment->generation,
+        };
+    };
+
     CompiledScene compiled;
     compiled.realtimeScene.revision = revision;
     compiled.realtimeScene.listener = scene.listener;
@@ -100,14 +155,6 @@ SceneCompileError SceneCompiler::compile(const DynamicScene& scene,
         realtimeSpeaker.position = speaker.position;
         if (speaker.enabled)
             ++compiled.realtimeScene.activeSpeakerCount;
-    }
-
-    std::vector<std::string> uniqueSources;
-    uniqueSources.reserve(activeSourceIds.size());
-    for (const auto& sourceId : activeSourceIds)
-    {
-        if (!contains(uniqueSources, sourceId))
-            uniqueSources.push_back(sourceId);
     }
 
     for (const auto& sourceId : uniqueSources)
@@ -141,8 +188,13 @@ SceneCompileError SceneCompiler::compile(const DynamicScene& scene,
             {
                 const auto& speaker = scene.speakers[index];
                 const auto slot = slotForSpeaker.at(speaker.stableId);
+                const auto identity = routeIdentityFor(legacyRouteStableId(sourceId, speaker.stableId));
+                if (!identity.has_value())
+                    return error(SceneCompileErrorCode::tooManyRoutes, "No free realtime route slot is available.");
                 const auto result = appendRoute(sourceId, {
                     .enabled = true,
+                    .routeSlot = identity->first,
+                    .routeGeneration = identity->second,
                     .speakerSlot = static_cast<std::uint16_t>(slot),
                     .speakerGeneration = assignments[slot].generation,
                     .mode = RouteMode::full,
@@ -163,8 +215,13 @@ SceneCompileError SceneCompiler::compile(const DynamicScene& scene,
                 return error(SceneCompileErrorCode::speakerNotFound, "A Route references an unknown Speaker Stable ID.");
 
             const auto slot = slotIt->second;
+            const auto identity = routeIdentityFor(route.stableId);
+            if (!identity.has_value())
+                return error(SceneCompileErrorCode::tooManyRoutes, "No free realtime route slot is available.");
             const auto result = appendRoute(route.sourceId, {
                 .enabled = route.enabled,
+                .routeSlot = identity->first,
+                .routeGeneration = identity->second,
                 .speakerSlot = static_cast<std::uint16_t>(slot),
                 .speakerGeneration = assignments[slot].generation,
                 .mode = route.mode,

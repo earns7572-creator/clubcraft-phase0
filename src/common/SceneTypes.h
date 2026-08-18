@@ -10,7 +10,7 @@ namespace clubcraft
 // than silently dropping routes; realtime code never allocates to grow them.
 inline constexpr std::size_t kMaxSpeakers = 16;
 inline constexpr std::size_t kMaxSources = 128;
-inline constexpr std::size_t kMaxRoutesGlobal = 512;
+inline constexpr std::size_t kMaxRoutesGlobal = 2048;
 inline constexpr std::size_t kMaxRoutesPerSource = 16;
 
 struct PlanarPosition

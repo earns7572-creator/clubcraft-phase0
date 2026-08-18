@@ -152,6 +152,8 @@ struct SourceRouteSlot
     std::atomic<std::uint64_t> revision { 0 };
     std::atomic<std::uint16_t> routeCount { 0 };
     std::array<std::atomic<bool>, kMaxRoutesPerSource> enabled;
+    std::array<std::atomic<std::uint16_t>, kMaxRoutesPerSource> routeSlot;
+    std::array<std::atomic<std::uint32_t>, kMaxRoutesPerSource> routeGeneration;
     std::array<std::atomic<std::uint16_t>, kMaxRoutesPerSource> speakerSlot;
     std::array<std::atomic<std::uint32_t>, kMaxRoutesPerSource> speakerGeneration;
     std::array<std::atomic<int>, kMaxRoutesPerSource> modeIndices;

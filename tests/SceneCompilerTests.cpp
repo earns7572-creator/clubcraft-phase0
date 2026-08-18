@@ -136,6 +136,43 @@ void testSceneStateRoundTrip()
     CHECK(restored->legacyRouteGain == 0.25f);
 }
 
+void testRouteGenerationSurvivesReorderAndChangesOnReuse()
+{
+    clubcraft::SceneCompiler compiler;
+    clubcraft::DynamicScene firstScene;
+    firstScene.speakers = { makeSpeaker("speaker-a"), makeSpeaker("speaker-b") };
+    firstScene.routes = {
+        makeRoute("route-a", "source", "speaker-a"),
+        makeRoute("route-b", "source", "speaker-b"),
+    };
+
+    clubcraft::CompiledScene firstCompiled;
+    CHECK(!compiler.compile(firstScene, { "source" }, 1, firstCompiled).hasError());
+    const auto firstRouteA = firstCompiled.sourcePlans.at("source").routes[0];
+
+    auto reorderedScene = firstScene;
+    std::swap(reorderedScene.routes[0], reorderedScene.routes[1]);
+    clubcraft::CompiledScene reorderedCompiled;
+    CHECK(!compiler.compile(reorderedScene, { "source" }, 2, reorderedCompiled).hasError());
+    const auto& reorderedPlan = reorderedCompiled.sourcePlans.at("source");
+    CHECK(reorderedPlan.routes[1].routeSlot == firstRouteA.routeSlot);
+    CHECK(reorderedPlan.routes[1].routeGeneration == firstRouteA.routeGeneration);
+
+    clubcraft::DynamicScene removedScene;
+    removedScene.speakers = firstScene.speakers;
+    clubcraft::CompiledScene removedCompiled;
+    CHECK(!compiler.compile(removedScene, { "source" }, 3, removedCompiled).hasError());
+
+    clubcraft::DynamicScene replacementScene;
+    replacementScene.speakers = firstScene.speakers;
+    replacementScene.routes = { makeRoute("route-replacement", "source", "speaker-a") };
+    clubcraft::CompiledScene replacementCompiled;
+    CHECK(!compiler.compile(replacementScene, { "source" }, 4, replacementCompiled).hasError());
+    const auto replacementRoute = replacementCompiled.sourcePlans.at("source").routes[0];
+    CHECK(replacementRoute.routeSlot == firstRouteA.routeSlot);
+    CHECK(replacementRoute.routeGeneration > firstRouteA.routeGeneration);
+}
+
 void testPendingAutomationAckAfterCommit()
 {
     using Field = clubcraft::LegacyAutomationField;
@@ -204,6 +241,7 @@ void runSceneCompilerTests()
     testLegacyRoutesUseQuarterGain();
     testGenerationChangesWhenSlotIsReused();
     testSceneStateRoundTrip();
+    testRouteGenerationSurvivesReorderAndChangesOnReuse();
     testPendingAutomationAckAfterCommit();
     testCapacityAndReferenceErrors();
 }
