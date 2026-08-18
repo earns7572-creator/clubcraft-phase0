@@ -218,6 +218,8 @@ void testDynamicSceneAndRoutePlanPublication()
     plan.routeCount = 1;
     plan.routes[0] = {
         .enabled = true,
+        .routeSlot = 11,
+        .routeGeneration = 7,
         .speakerSlot = 0,
         .speakerGeneration = 3,
         .mode = clubcraft::RouteMode::full,
@@ -231,6 +233,8 @@ void testDynamicSceneAndRoutePlanPublication()
     CHECK(publishedPlan.has_value());
     CHECK(publishedPlan->revision == 55);
     CHECK(publishedPlan->routeCount == 1);
+    CHECK(publishedPlan->routes[0].routeSlot == 11);
+    CHECK(publishedPlan->routes[0].routeGeneration == 7);
     CHECK(publishedPlan->routes[0].speakerGeneration == 3);
 
     const auto duplicateSource = registry.registerSource({
