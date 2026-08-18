@@ -127,6 +127,6 @@ SOURCEはクラブのステージ原点に固定されます。CLUBでは各Spea
 
 0.6.0では、可変Speaker / source別RoutePlan / schema 7 migrationの内部基盤を導入しました。設計・Realtime安全性・legacy互換の詳細は [PHASE6_FOUNDATION.md](PHASE6_FOUNDATION.md)、Intel MacとAbleton Liveでの試用は [PHASE6_TRYOUT.md](PHASE6_TRYOUT.md)、将来の4ch / 8ch方式を決めるHost I/O調査は [OUTPUT_FEASIBILITY_SPIKE.md](OUTPUT_FEASIBILITY_SPIKE.md) を参照してください。
 
-## 0.7.0 Dynamic Speaker & Routing UI 計画
+## 0.7.0 Dynamic Speaker & Routing UI
 
-次の開発段階では、最大16 Speakerの追加・削除・自由配置、Listenerの2D配置、SOURCE→SpeakerのFull Route作成・削除・mute・gain操作を導入します。初版の操作計画は [PHASE7_PLAN.md](PHASE7_PLAN.md) ですが、実装判断の正本はChatGPTレビューを反映した [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) です。初回レビュー依頼は [CHATGPT_REVIEW_PROMPT_0_7.md](CHATGPT_REVIEW_PROMPT_0_7.md)、修正版Gateの再レビュー依頼は [CHATGPT_REVIEW_PROMPT_0_7_REVISED.md](CHATGPT_REVIEW_PROMPT_0_7_REVISED.md)、Gate A〜R同期後の最終GO判定は [CHATGPT_REVIEW_PROMPT_0_7_FINAL.md](CHATGPT_REVIEW_PROMPT_0_7_FINAL.md) を使用してください。
+0.7.0では、最大16 Speakerの追加・削除・自由配置、Listenerの2D配置、SOURCE→SpeakerのFull Route作成・削除、virtualized Routing Matrix、legacy route materialisationを実装しました。SOURCEは固定Audio Workerであり、位置をユーザーが動かすことはできません。実装判断の正本はChatGPT最終GOを得た [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) のGate A〜Rです。設計・実装の操作計画は [PHASE7_PLAN.md](PHASE7_PLAN.md)、Intel MacとAbleton Liveでの具体的な試用は [PHASE7_TRYOUT.md](PHASE7_TRYOUT.md) を参照してください。
