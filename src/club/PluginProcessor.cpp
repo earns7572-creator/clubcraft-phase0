@@ -309,6 +309,170 @@ clubcraft::DynamicScene ClubCraftPhase0AudioProcessor::copyDynamicScene() const
     return dynamicScene;
 }
 
+std::vector<clubcraft::SourceRegistration> ClubCraftPhase0AudioProcessor::getKnownSources() const
+{
+    return clubcraft::SessionRegistry::instance().getSourcesForSession(sessionId.toStdString());
+}
+
+bool ClubCraftPhase0AudioProcessor::moveSpeaker(const std::string& stableId,
+                                                 clubcraft::PlanarPosition position,
+                                                 bool finalPosition)
+{
+    return editDynamicScene(
+               [&stableId, position](clubcraft::DynamicScene& candidate)
+               {
+                   const auto speaker = std::find_if(candidate.speakers.begin(), candidate.speakers.end(),
+                                                     [&stableId](const auto& item) { return item.stableId == stableId; });
+                   if (speaker == candidate.speakers.end())
+                       return false;
+                   speaker->position = position;
+                   return true;
+               },
+               finalPosition)
+        == SceneEditResult::committed;
+}
+
+bool ClubCraftPhase0AudioProcessor::moveListener(clubcraft::PlanarPosition position, bool finalPosition)
+{
+    return editDynamicScene(
+               [position](clubcraft::DynamicScene& candidate)
+               {
+                   candidate.listener = position;
+                   return true;
+               },
+               finalPosition)
+        == SceneEditResult::committed;
+}
+
+bool ClubCraftPhase0AudioProcessor::addSpeaker(clubcraft::SpeakerType type, clubcraft::PlanarPosition position)
+{
+    const auto stableId = juce::Uuid().toString().toStdString();
+    return editDynamicScene(
+               [stableId, type, position](clubcraft::DynamicScene& candidate)
+               {
+                   if (candidate.legacyDefaultRouting || candidate.speakers.size() >= clubcraft::kMaxSpeakers)
+                       return false;
+                   candidate.speakers.push_back({
+                       .stableId = stableId,
+                       .name = "Speaker " + std::to_string(candidate.speakers.size() + 1U),
+                       .type = type,
+                       .position = position,
+                       .levelDb = 0.0f,
+                       .enabled = true,
+                   });
+                   return true;
+               },
+               true)
+        == SceneEditResult::committed;
+}
+
+bool ClubCraftPhase0AudioProcessor::removeSpeaker(const std::string& stableId)
+{
+    return editDynamicScene(
+               [&stableId](clubcraft::DynamicScene& candidate)
+               {
+                   if (candidate.legacyDefaultRouting)
+                       return false;
+                   const auto speaker = std::find_if(candidate.speakers.begin(), candidate.speakers.end(),
+                                                     [&stableId](const auto& item) { return item.stableId == stableId; });
+                   if (speaker == candidate.speakers.end())
+                       return false;
+                   candidate.speakers.erase(speaker);
+                   std::erase_if(candidate.routes, [&stableId](const auto& route)
+                   {
+                       return route.speakerStableId == stableId;
+                   });
+                   return true;
+               },
+               true)
+        == SceneEditResult::committed;
+}
+
+bool ClubCraftPhase0AudioProcessor::setFullRouteEnabled(const std::string& routeSourceId,
+                                                         const std::string& speakerStableId,
+                                                         bool enabled)
+{
+    return editDynamicScene(
+               [&routeSourceId, &speakerStableId, enabled](clubcraft::DynamicScene& candidate)
+               {
+                   if (candidate.legacyDefaultRouting)
+                       return false;
+
+                   const auto speakerExists = std::any_of(candidate.speakers.begin(), candidate.speakers.end(),
+                                                          [&speakerStableId](const auto& speaker)
+                                                          { return speaker.stableId == speakerStableId; });
+                   if (!speakerExists)
+                       return false;
+
+                   const auto route = std::find_if(candidate.routes.begin(), candidate.routes.end(),
+                                                   [&routeSourceId, &speakerStableId](const auto& item)
+                                                   {
+                                                       return item.sourceId == routeSourceId
+                                                           && item.speakerStableId == speakerStableId
+                                                           && item.mode == clubcraft::RouteMode::full
+                                                           && item.inputMode == clubcraft::InputChannelMode::sumMono;
+                                                   });
+                   if (!enabled)
+                   {
+                       if (route != candidate.routes.end())
+                           candidate.routes.erase(route);
+                       return true;
+                   }
+                   if (route != candidate.routes.end())
+                       return true;
+                   if (candidate.routes.size() >= clubcraft::kMaxRoutesGlobal)
+                       return false;
+
+                   candidate.routes.push_back({
+                       .stableId = "route:" + routeSourceId + ":" + speakerStableId + ":" + juce::Uuid().toString().toStdString(),
+                       .sourceId = routeSourceId,
+                       .speakerStableId = speakerStableId,
+                       .mode = clubcraft::RouteMode::full,
+                       .inputMode = clubcraft::InputChannelMode::sumMono,
+                       .gainLinear = 1.0f,
+                       .enabled = true,
+                   });
+                   return true;
+               },
+               true)
+        == SceneEditResult::committed;
+}
+
+bool ClubCraftPhase0AudioProcessor::materialiseLegacyRouting()
+{
+    const auto sources = getKnownSources();
+    return editDynamicScene(
+               [&sources](clubcraft::DynamicScene& candidate)
+               {
+                   if (!candidate.legacyDefaultRouting)
+                       return true;
+                   const auto legacySpeakerCount = std::min<std::size_t>(clubcraft::kSpeakerCount, candidate.speakers.size());
+                   if (candidate.routes.size() + sources.size() * legacySpeakerCount > clubcraft::kMaxRoutesGlobal)
+                       return false;
+
+                   for (const auto& source : sources)
+                   {
+                       for (std::size_t index = 0; index < legacySpeakerCount; ++index)
+                       {
+                           const auto& speaker = candidate.speakers[index];
+                           candidate.routes.push_back({
+                               .stableId = "legacy-route:" + source.sourceId + ":" + speaker.stableId,
+                               .sourceId = source.sourceId,
+                               .speakerStableId = speaker.stableId,
+                               .mode = clubcraft::RouteMode::full,
+                               .inputMode = clubcraft::InputChannelMode::sumMono,
+                               .gainLinear = candidate.legacyRouteGain,
+                               .enabled = true,
+                           });
+                       }
+                   }
+                   candidate.legacyDefaultRouting = false;
+                   return true;
+               },
+               true)
+        == SceneEditResult::committed;
+}
+
 std::uint64_t ClubCraftPhase0AudioProcessor::getControlSceneRevision() const noexcept
 {
     return controlSceneRevision.load(std::memory_order_acquire);

@@ -67,7 +67,16 @@ public:
     [[nodiscard]] SceneEditResult editDynamicScene(const std::function<bool(clubcraft::DynamicScene&)>& edit,
                                                    bool urgentPublish = false);
     [[nodiscard]] clubcraft::DynamicScene copyDynamicScene() const;
+    [[nodiscard]] std::vector<clubcraft::SourceRegistration> getKnownSources() const;
     [[nodiscard]] std::uint64_t getControlSceneRevision() const noexcept;
+    [[nodiscard]] bool moveSpeaker(const std::string& stableId, clubcraft::PlanarPosition position, bool finalPosition);
+    [[nodiscard]] bool moveListener(clubcraft::PlanarPosition position, bool finalPosition);
+    [[nodiscard]] bool addSpeaker(clubcraft::SpeakerType type, clubcraft::PlanarPosition position);
+    [[nodiscard]] bool removeSpeaker(const std::string& stableId);
+    [[nodiscard]] bool setFullRouteEnabled(const std::string& routeSourceId,
+                                            const std::string& speakerStableId,
+                                            bool enabled);
+    [[nodiscard]] bool materialiseLegacyRouting();
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
