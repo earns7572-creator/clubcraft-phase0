@@ -216,4 +216,4 @@ Floor Viewの`RESET LAYOUT`は`RESET POSITIONS`へ改名し、SpeakerまたはRo
 - Route reorder / route slot reuseでsmootherが別Routeへ移らない。
 - mute ramp、gain 0、NaN / Inf reject、pending automation中state保存を検証する。
 
-> 実装開始の唯一の承認条件は、`ARCHITECTURE_GATE_0_7.md`のGate A〜Oが最終レビューでGOとなることである。
+> 実装開始の唯一の承認条件は、`ARCHITECTURE_GATE_0_7.md`のGate A〜Rが最終レビューでGOとなることである。

@@ -493,7 +493,7 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 
 ### 0.7.0 — Dynamic Speaker, Full Routing & Listener UI
 
-0.7.0では、0.6.0のDynamic Sceneをユーザー操作へ公開する。唯一の実装判断正本は [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) であり、Gate A〜Oの最終GOなしにコードを書かない。
+0.7.0では、0.6.0のDynamic Sceneをユーザー操作へ公開する。唯一の実装判断正本は [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) であり、Gate A〜Rの最終GOなしにコードを書かない。
 
 - 最大16 Speakerのadd/remove、Type、Level、X/Y、mute
 - Floor View上のSpeaker dragとListener drag
@@ -574,7 +574,7 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 9. 0.7.0では`parameterChanged()`がatomic pending mailboxだけを更新し、message threadがStable ID基準でDynamicSceneへ適用する設計を確認
 10. revision付きcandidate transaction、route slot + generation、gain / mute smoothing、legacy materialisation rollbackを確認
 11. 変更対象ファイル一覧を提示
-12. [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) のGate A〜Oを満たす設計を提示する
+12. [ARCHITECTURE_GATE_0_7.md](ARCHITECTURE_GATE_0_7.md) のGate A〜Rを満たす設計を提示する
 13. その設計を承認されるまでコードを書かない
 
 ---

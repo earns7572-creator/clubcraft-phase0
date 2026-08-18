@@ -232,7 +232,7 @@ Gate Hのテストに、以下を追加する。
 
 ## 更新後のGO条件
 
-Gate A〜Oを`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEへ同期し、`CHATGPT_REVIEW_PROMPT_0_7_FINAL.md`による最終レビューでGOを得るまで、0.7.0のコード実装は開始しない。
+Gate A〜Rを`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEへ同期し、`CHATGPT_REVIEW_PROMPT_0_7_FINAL.md`による最終レビューでGOを得るまで、0.7.0のコード実装は開始しない。
 
 ## Gate N — Pending automation中のHost state保存
 
@@ -266,4 +266,64 @@ MatrixのRoute deleteは、RouteConfigをcandidate Sceneから削除するが、
 
 ## 最終GO条件の補足
 
-Gate A〜Oを正本とする。`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEに矛盾する512 Route、直接callback編集、旧ロードマップが残らないことを確認してから最終GO判定を依頼する。
+Gate A〜Rを正本とする。`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEに矛盾する512 Route、直接callback編集、旧ロードマップが残らないことを確認してから最終GO判定を依頼する。
+
+## Gate P — State overlay snapshotのrevision retry
+
+Gate Nのoverlay snapshotは、Scene copyとpending mailbox snapshotの間にTimerがScene commitした場合でも、最新の整合した状態を保存しなければならない。
+
+```text
+repeat up to kMaxStateSnapshotRetries (例: 3)
+    read controlSceneRevisionBefore
+    lock sceneEditMutex
+    copy authoritative DynamicScene
+    unlock
+    copy pending automation mailbox with mailbox revision / seqlock
+    read controlSceneRevisionAfter
+    if controlSceneRevisionBefore == controlSceneRevisionAfter:
+        overlay pending mailbox onto Scene copy
+        serialize Scene copy
+        success
+retry exhausted:
+    lock sceneEditMutex
+    copy authoritative DynamicScene
+    copy pending mailbox with its lock-free seqlock snapshot while sceneEditMutex is held
+    unlock sceneEditMutex
+    overlay and serialize one explicitly consistent snapshot
+```
+
+- `controlSceneRevisionBefore != controlSceneRevisionAfter`なら、そのScene copyとmailbox snapshotを捨てて最初からretryする。
+- pending mailboxもrevision / seqlockで読む。複数legacy parameterの中途半端な組合せを保存してはならない。
+- State保存のためにauthoritative DynamicScene、pending mailbox、APVTS parameterを変更してはならない。
+- retry上限到達時のfallbackはaudio threadから呼ばれないState保存経路だけで実行する。`sceneEditMutex`を保持したままauthoritative Scene copyの直後にmailboxをlock-free seqlock snapshotし、その後unlockする。この順序によりTimer / AsyncUpdaterはScene commitとmailbox clearをsnapshot途中へ挿入できない。parameterChanged()はmutexを取らず、seqlock writerとして更新できる。Compiler、Registry、Host notificationをmutex保持中に呼ばない。
+
+## Gate Q — Route retirement Voiceの固定容量
+
+Route削除fadeをRealtime安全にするため、`SourceRouteStereoRenderer`はprepare時に固定容量のVoice stateを事前確保する。
+
+| Voice pool | 容量 | 用途 |
+|---|---:|---|
+| Active route voices | `MAX_ROUTES_PER_SOURCE` = 16 | 現在Planに存在するRouteのgain smoother、filter state、position state。 |
+| Retiring route voices | `MAX_ROUTES_PER_SOURCE` = 16 | 削除された旧generation Routeを10ms fade-outするための独立state。 |
+| 合計 | 32 per SOURCE renderer | Route delete / slot reuse中にもdynamic allocationなし。 |
+
+- 最悪ケースは、16 active Routeを同時削除し16 retiring Voiceへ移し、その直後に16新Routeがactiveになる状態である。この`16 active + 16 retiring`をallocationなしで処理できなければならない。
+- Route削除時、対応するactive `routeSlot + routeGeneration` Voiceをretiring poolへmove / copyし、target gain=0の10ms rampを開始する。
+- 同じrouteSlotが新generationで再利用されても、新active Voiceは別stateを初期化する。retiring Voiceとstateを共有しない。
+- retiring pool満杯はcontrol-side UIの通常操作では起こらない設計とする。発生時は最も古いretiring Voiceを0へ即時完了させる前に、diagnostic counterを増やす。audio threadでallocateまたはwaitしてはならない。
+- 10ms fade完了後にのみretiring Voiceのfilter / smoother stateをreleaseし、poolへ戻す。
+
+## Gate R — 追加必須テスト
+
+Gate H / Mのテストに、以下を追加する。
+
+1. Scene copy直後にTimerがpending automationをcommitするinterleaveで、Gate Pがrevision mismatchを検出してretryし、旧Scene + clear mailboxを保存しない。
+2. pending mailbox seqlockが複数legacy parameterを一貫してsnapshotする。
+3. State保存中に新automationが来ても、保存Sceneはcommit済みSceneまたは明確にoverlay済みSceneのどちらかであり、混在しない。
+4. 16 Routeを同時削除して16 retiring Voiceを作り、直後に16新Routeを追加しても、16 active + 16 retiringをallocationなしで処理する。
+5. routeSlot再利用時、旧generation retiring VoiceのDSP stateが新generation active Voiceへ混入しない。
+6. 10ms後にretiring Voice数が0へ戻り、last Route deletion後は新0-route revisionを使ってsilentになる。
+
+## 最終GO条件
+
+Gate A〜Rを正本とする。Gate Pのrevision retry、Gate Qの固定容量Voice pool、Gate Rのinterleave / 最大retirementテストを実装前に承認し、最終GO判定を得るまで0.7.0のコード実装は開始しない。
