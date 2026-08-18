@@ -18,7 +18,7 @@ branch: main
 - PHASE6_FOUNDATION.md
 - IMPLEMENTATION_REVIEW_0_6.md
 
-今回のGateは前回レビューの残る4点を解決するため、次を追加済みです。
+今回のGateは前回レビューの残る4点に加え、pending automation保存とRoute削除fadeを解決するため、次を追加済みです。
 
 1. parameterChanged()はatomic pending valueとdirty flagだけを更新し、DynamicScene、mutex、vector、string、ValueTree、Compiler、Registryを触らない。
 2. Timer / AsyncUpdaterのmessage threadがpending automationをStable ID `legacy-speaker-N`へ適用する。
@@ -26,7 +26,9 @@ branch: main
 4. Stable Route IDはpersistent routeSlot + routeGenerationへ対応し、Renderer stateはplan配列indexでなくRoute identityに紐付ける。
 5. Route / Speaker muteは即skipでなくtarget gain=0への10〜20ms rampとする。
 6. `MAX_ROUTES_GLOBAL=2048`、`MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_PER_SOURCE=16`へ同期済み。
-7. CHATGPT_HANDOFF.md、CHATGPT_PROMPTS.md、PHASE7_PLAN.md、READMEをGate A〜Mへ同期済み。
+7. Host state保存はauthoritative Scene copyへpending automation mailboxのrevision付きsnapshotをoverlayしてserializeし、保存のためにauthoritative stateを変更しない。
+8. Route deleteでPlanから消えたVoiceはretiring状態で10ms fade-outしてからDSP stateをreleaseする。
+9. CHATGPT_HANDOFF.md、CHATGPT_PROMPTS.md、PHASE7_PLAN.md、READMEをGate A〜Oへ同期済み。
 
 以下を確認してください。
 

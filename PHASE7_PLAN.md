@@ -110,7 +110,7 @@ schema≤6からmigrationしたSetでは、4 Speakerへのimplicit Routeが内�
 | Route add | 同じFULL Routeの重複をUI APIが拒否する。 |
 | Route delete / mute / gain | 対象Routeだけを変更し、他SOURCEのRoutePlanは破損しない。 |
 | Legacy materialisation | 登録SOURCE×4 Speaker分の0.25 gain Routeが一度だけ生成される。 |
-| State round-trip | 16 Speaker、512 Route、Listener、selected UI stateを保存・復元できる。 |
+| State round-trip | 16 Speaker、**2048 Route**、Listener、legacy materialisation状態を保存・復元できる。UIの選択状態やscroll位置は保存しない。 |
 | Capacity rejection | 容量超過がcontrol側で失敗し、Realtime Planを破壊しない。 |
 
 ### UI / 実機テスト
@@ -216,4 +216,4 @@ Floor Viewの`RESET LAYOUT`は`RESET POSITIONS`へ改名し、SpeakerまたはRo
 - Route reorder / route slot reuseでsmootherが別Routeへ移らない。
 - mute ramp、gain 0、NaN / Inf reject、pending automation中state保存を検証する。
 
-> 実装開始の唯一の承認条件は、`ARCHITECTURE_GATE_0_7.md`のGate A〜Mが最終レビューでGOとなることである。
+> 実装開始の唯一の承認条件は、`ARCHITECTURE_GATE_0_7.md`のGate A〜Oが最終レビューでGOとなることである。

@@ -90,7 +90,7 @@ ARCHITECTURE_GATE_0_6.md のGate A〜Hを満たす設計を確認し、0.6.0の�
 - CL​​UBをControl Plane、SOURCEをAudio Workerとして実装する。Routingのauthoritative stateはCLUBにのみ保存する
 - Route Contribution → Virtual Speaker Voice → Preview / Discrete Outputの3層を明示する。Virtual Speaker Voiceは線形DSPに限定し、saturation / limiter / distortion / nonlinear compressionは追加しない
 - SOURCEのaudio threadは自分専用の最大16 RoutePlanだけを読む。Global Routeを全走査しない
-- これは**0.6.0の履歴上限**として`MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_GLOBAL=512`、`MAX_ROUTES_PER_SOURCE=16`を採用した。0.7.0以降の実装では、後半の「G. 0.7.0」節にある`MAX_ROUTES_GLOBAL=2048`とGate A〜Mを必ず優先する。
+- これは**0.6.0の履歴上限**として`MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_GLOBAL=512`、`MAX_ROUTES_PER_SOURCE=16`を採用した。0.7.0以降の実装では、後半の「G. 0.7.0」節にある`MAX_ROUTES_GLOBAL=2048`とGate A〜Oを必ず優先する。
 - Speaker slot + generationでstale Routeを無効にし、duplicate SOURCEは新IDへrekeyしてRouteを自動複製しない。duplicate CLUBはConflictとしてpublishしない
 - Dynamic Sceneをauthoritative state、旧APVTSを最初の4 Speaker用compatibility bridgeとして扱う。legacy migration時だけ内部gain 0.25を使い、新Sceneを自動normalizationしない
 - `OUTPUT_FEASIBILITY_SPIKE.md` を作成し、4ch / 8ch backendを決め打ちせずHost I/O実現可能性を記録する
@@ -123,7 +123,7 @@ GitHubの https://github.com/earns7572-creator/clubcraft-phase0 の main ブラ�
 - IMPLEMENTATION_REVIEW_0_6.md
 - PHASE6_FOUNDATION.md
 
-0.7.0の唯一の実装判断正本はARCHITECTURE_GATE_0_7.mdです。Gate A〜Mが最終レビューでGOとなるまで、コードを書いてはいけません。
+0.7.0の唯一の実装判断正本はARCHITECTURE_GATE_0_7.mdです。Gate A〜Oが最終レビューでGOとなるまで、コードを書いてはいけません。
 
 0.7.0で実装するのは、最大16 Speakerの追加・削除・自由配置、Listener drag、SOURCE→SpeakerのFull + SUM_MONO Route create/delete/mute/gain、virtualized Routing Matrix、legacy materialisationです。SOURCEは固定Audio Workerであり、位置を動かしてはいけません。
 
@@ -136,13 +136,14 @@ GitHubの https://github.com/earns7572-creator/clubcraft-phase0 の main ブラ�
 - sceneEditMutexはcopy / swapだけ。compile、Registry publish、ValueTree、Host parameter通知中はmutexを保持しない。
 - drag publishは最大30Hz、mouseUpは最終位置を即時publishする。
 - Stable Route IDをpersistent routeSlot + routeGenerationへ対応させる。Renderer stateをRoutePlan配列indexに紐付けない。
-- route enabled=falseとSpeaker muteは即skipしない。target gain=0へ10〜20ms rampし、fade完了後にsilentにする。
+- route enabled=falseとSpeaker muteは即skipしない。target gain=0へ10〜20ms rampし、fade完了後にsilentにする。Route deleteでPlanから消えたVoiceもretiring状態で10ms fade-outしてからDSP stateをreleaseする。
+- Host state保存ではauthoritative Scene copyへpending automation mailboxのrevision付きsnapshotをoverlayしてserializeする。保存のためにauthoritative Sceneやmailboxを変更しない。
 - legacy materialisationと最初のRoute操作は同一candidate transaction。Cancel / capacity failureではSceneを一切変更しない。
 - SOURCE unregister時にpersisted RouteConfigを削除しない。offline rowとして表示する。duplicate SOURCEはnew/unrouted、duplicate CLUBはread-only。
 - Band DSP、HRTF、完成版Binaural、4ch / 8ch本出力、RTAは実装しない。
 
 作業順序:
-1. Gate A〜Mの要件を満たすProcessor editing API、pending automation mailbox、revision transaction、route slot lifecycleの設計を提示し、承認を待つ。
+1. Gate A〜Oの要件を満たすProcessor editing API、pending automation mailbox、revision transaction、route slot lifecycleの設計を提示し、承認を待つ。
 2. 承認後にcontrol-side transactionと単体テストを実装する。
 3. 次にsmoothingとdirty publishを実装・検証する。
 4. その後Floor View、Speaker Inspector、virtualized Matrix、legacy materialisation dialogを小さく実装する。

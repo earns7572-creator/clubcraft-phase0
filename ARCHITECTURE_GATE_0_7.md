@@ -17,7 +17,7 @@ ChatGPTレビューにより、初版の`PHASE7_PLAN.md`はそのままでは**N
 | 操作の起点 | データの流れ |
 |---|---|
 | Floor View / Inspector / Routing Matrix | UI edit → DynamicScene → compile / publish → legacy APVTS mirror（必要な最初の4 Speakerだけ） |
-| 旧APVTS automation | parameterChanged → stable ID `legacy-speaker-N`を検索 → DynamicScene編集 → compile / publish |
+| 旧APVTS automation | `parameterChanged()`はpending atomic値とdirty bitだけを更新 → Timer / AsyncUpdaterのmessage threadがStable ID `legacy-speaker-N`を検索 → revision付きDynamicScene transaction → compile / publish |
 | 新規Speaker 5〜16 | DynamicSceneだけを操作する。旧APVTSへ割り当てない。 |
 
 - Legacy mappingはvector indexではなく`legacy-speaker-1`〜`legacy-speaker-4`のStable IDを使う。
@@ -232,4 +232,38 @@ Gate Hのテストに、以下を追加する。
 
 ## 更新後のGO条件
 
-Gate A〜Mを`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEへ同期し、`CHATGPT_REVIEW_PROMPT_0_7_FINAL.md`による最終レビューでGOを得るまで、0.7.0のコード実装は開始しない。
+Gate A〜Oを`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEへ同期し、`CHATGPT_REVIEW_PROMPT_0_7_FINAL.md`による最終レビューでGOを得るまで、0.7.0のコード実装は開始しない。
+
+## Gate N — Pending automation中のHost state保存
+
+DynamicSceneはauthoritativeだが、Hostがstateを要求した瞬間にAPVTS pending automation mailboxが未適用である場合がある。State保存は次の**overlay snapshot**規則を必ず使う。
+
+1. `sceneEditMutex`を短時間取得し、authoritative DynamicSceneと`controlSceneRevision`をcopyする。
+2. mutexを解放する。
+3. pending automation mailboxをseqlockまたはrevision付きsnapshotとしてcopyする。
+4. copy側Sceneだけへpending automationをStable ID基準でoverlayする。
+5. overlay済みcopyをschema 7 ValueTreeへserializeする。
+6. State保存のためにauthoritative DynamicScene、pending mailbox、APVTS parameterを変更してはならない。
+
+- save中に新しいparameterChangedが来ても、mailbox snapshot revisionが一致する一組だけを使う。中途半端な複数parameter値を混在させない。
+- 次のTimer tickは通常どおりpending mailboxをauthoritative DynamicSceneへ適用する。
+- state restoreはEditorを開かなくても同じDynamicSceneを復元できる。
+
+## Gate O — Route削除のfade-out
+
+MatrixのRoute deleteは、RouteConfigをcandidate Sceneから削除するが、Rendererは出力中のVoiceを即座に切らない。
+
+| 時点 | Rendererの扱い |
+|---|---|
+| 新PlanにRouteが存在 | current Voiceのtarget gainをRoute gainへ設定する。 |
+| 新PlanにRouteが存在しない | matching `routeSlot + routeGeneration` Voiceをretiring状態へ移し、target gain=0で10ms fade-outする。 |
+| fade完了 | Voiceのfilter / smoother stateをreleaseする。 |
+| 同slotが新generationで再利用 | 新Voice stateを初期化する。retiring Voiceと同一stateを共有しない。 |
+
+- Route delete、Speaker deleteによる関連Route削除、CLUB ownership変更のすべてで同じretirement規則を使う。
+- last Route deletionは新しい0-route revisionを即時採用する。retiring Voiceのfade完了後にSOURCEはsilentになる。
+- Route slot再利用時に旧generationのDSP stateを再利用してはならない。
+
+## 最終GO条件の補足
+
+Gate A〜Oを正本とする。`PHASE7_PLAN.md`、`CHATGPT_HANDOFF.md`、`CHATGPT_PROMPTS.md`、READMEに矛盾する512 Route、直接callback編集、旧ロードマップが残らないことを確認してから最終GO判定を依頼する。
