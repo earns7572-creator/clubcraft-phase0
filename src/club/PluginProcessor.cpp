@@ -438,6 +438,58 @@ bool ClubCraftPhase0AudioProcessor::setFullRouteEnabled(const std::string& route
         == SceneEditResult::committed;
 }
 
+bool ClubCraftPhase0AudioProcessor::setFullRouteGain(const std::string& routeSourceId,
+                                                      const std::string& speakerStableId,
+                                                      float linearGain,
+                                                      bool shouldUrgentlyPublish)
+{
+    if (!std::isfinite(linearGain) || linearGain < 0.0f)
+        return false;
+
+    return editDynamicScene(
+               [&routeSourceId, &speakerStableId, linearGain](clubcraft::DynamicScene& candidate)
+               {
+                   const auto route = std::find_if(candidate.routes.begin(), candidate.routes.end(),
+                                                   [&routeSourceId, &speakerStableId](const auto& item)
+                                                   {
+                                                       return item.sourceId == routeSourceId
+                                                           && item.speakerStableId == speakerStableId
+                                                           && item.mode == clubcraft::RouteMode::full
+                                                           && item.inputMode == clubcraft::InputChannelMode::sumMono;
+                                                   });
+                   if (candidate.legacyDefaultRouting || route == candidate.routes.end())
+                       return false;
+                   route->gainLinear = linearGain;
+                   return true;
+               },
+               shouldUrgentlyPublish)
+        == SceneEditResult::committed;
+}
+
+bool ClubCraftPhase0AudioProcessor::setFullRouteMuted(const std::string& routeSourceId,
+                                                       const std::string& speakerStableId,
+                                                       bool muted)
+{
+    return editDynamicScene(
+               [&routeSourceId, &speakerStableId, muted](clubcraft::DynamicScene& candidate)
+               {
+                   const auto route = std::find_if(candidate.routes.begin(), candidate.routes.end(),
+                                                   [&routeSourceId, &speakerStableId](const auto& item)
+                                                   {
+                                                       return item.sourceId == routeSourceId
+                                                           && item.speakerStableId == speakerStableId
+                                                           && item.mode == clubcraft::RouteMode::full
+                                                           && item.inputMode == clubcraft::InputChannelMode::sumMono;
+                                                   });
+                   if (candidate.legacyDefaultRouting || route == candidate.routes.end())
+                       return false;
+                   route->enabled = !muted;
+                   return true;
+               },
+               true)
+        == SceneEditResult::committed;
+}
+
 bool ClubCraftPhase0AudioProcessor::materialiseLegacyRouting()
 {
     const auto sources = getKnownSources();

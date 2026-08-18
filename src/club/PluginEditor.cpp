@@ -216,19 +216,24 @@ class ClubCraftPhase0AudioProcessorEditor::RoutingMatrix final : public juce::Co
 public:
     using Changed = std::function<void()>;
     using MaterialiseRequested = std::function<void()>;
+    using RouteSelected = std::function<void(const std::string&, const std::string&)>;
 
     RoutingMatrix(ClubCraftPhase0AudioProcessor& processorToUse, Changed onChanged,
-                  MaterialiseRequested onMaterialiseRequested)
+                  MaterialiseRequested onMaterialiseRequested, RouteSelected routeSelectedCallback)
         : pluginProcessor(processorToUse), onSceneChanged(std::move(onChanged)),
-          onMaterialise(std::move(onMaterialiseRequested))
+          onMaterialise(std::move(onMaterialiseRequested)), onRouteSelected(std::move(routeSelectedCallback))
     {
     }
 
     void update(const clubcraft::DynamicScene& newScene,
                 const std::vector<clubcraft::SourceRegistration>& sources,
-                const juce::String& search)
+                const juce::String& search,
+                const std::string& selectedSourceId,
+                const std::string& selectedSpeakerId)
     {
         scene = newScene;
+        selectedRouteSourceId = selectedSourceId;
+        selectedRouteSpeakerId = selectedSpeakerId;
         sourceRows.clear();
         std::unordered_set<std::string> knownIds;
         for (const auto& source : sources)
@@ -292,14 +297,22 @@ public:
             for (std::size_t speakerIndex = 0; speakerIndex < scene.speakers.size(); ++speakerIndex)
             {
                 const auto x = kMatrixSourceWidth + static_cast<int>(speakerIndex) * kMatrixSpeakerWidth;
-                const auto isRouted = hasFullRoute(source.sourceId, scene.speakers[speakerIndex].stableId);
+                const auto* route = findFullRoute(source.sourceId, scene.speakers[speakerIndex].stableId);
+                const auto isRouted = route != nullptr;
+                const auto isSelected = source.sourceId == selectedRouteSourceId
+                    && scene.speakers[speakerIndex].stableId == selectedRouteSpeakerId;
                 const auto cell = juce::Rectangle<float>(static_cast<float>(x + 8), static_cast<float>(y + 6),
                                                           static_cast<float>(kMatrixSpeakerWidth - 16), 18.0f);
-                graphics.setColour(isRouted ? kAccent : kGraphite.withAlpha(0.12f));
+                graphics.setColour(isRouted ? (route->enabled ? kAccent : kWarmAccent) : kGraphite.withAlpha(0.12f));
                 graphics.fillRoundedRectangle(cell, 9.0f);
+                if (isSelected)
+                {
+                    graphics.setColour(kGraphite);
+                    graphics.drawRoundedRectangle(cell, 9.0f, 1.5f);
+                }
                 graphics.setColour(isRouted ? kPanel : kMutedGraphite);
                 graphics.setFont(10.0f);
-                graphics.drawText(isRouted ? "ON" : "—", cell, juce::Justification::centred);
+                graphics.drawText(isRouted ? (route->enabled ? "ON" : "MUTE") : "—", cell, juce::Justification::centred);
             }
         }
     }
@@ -320,7 +333,8 @@ public:
 
         const auto& source = sourceRows[static_cast<std::size_t>(row)];
         const auto& speaker = scene.speakers[static_cast<std::size_t>(column)];
-        const auto enabled = !hasFullRoute(source.sourceId, speaker.stableId);
+        onRouteSelected(source.sourceId, speaker.stableId);
+        const auto enabled = findFullRoute(source.sourceId, speaker.stableId) == nullptr;
         if (pluginProcessor.setFullRouteEnabled(source.sourceId, speaker.stableId, enabled))
             onSceneChanged();
     }
@@ -333,20 +347,25 @@ private:
         bool offline = false;
     };
 
-    [[nodiscard]] bool hasFullRoute(const std::string& sourceId, const std::string& speakerId) const
+    [[nodiscard]] const clubcraft::RouteConfig* findFullRoute(const std::string& sourceId,
+                                                               const std::string& speakerId) const
     {
-        return std::any_of(scene.routes.begin(), scene.routes.end(), [&sourceId, &speakerId](const auto& route)
+        const auto route = std::find_if(scene.routes.begin(), scene.routes.end(), [&sourceId, &speakerId](const auto& item)
         {
-            return route.sourceId == sourceId && route.speakerStableId == speakerId
-                && route.mode == clubcraft::RouteMode::full && route.inputMode == clubcraft::InputChannelMode::sumMono;
+            return item.sourceId == sourceId && item.speakerStableId == speakerId
+                && item.mode == clubcraft::RouteMode::full && item.inputMode == clubcraft::InputChannelMode::sumMono;
         });
+        return route == scene.routes.end() ? nullptr : &*route;
     }
 
     ClubCraftPhase0AudioProcessor& pluginProcessor;
     Changed onSceneChanged;
     MaterialiseRequested onMaterialise;
+    RouteSelected onRouteSelected;
     clubcraft::DynamicScene scene;
     std::vector<SourceRow> sourceRows;
+    std::string selectedRouteSourceId;
+    std::string selectedRouteSpeakerId;
 };
 
 ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
@@ -473,8 +492,47 @@ ClubCraftPhase0AudioProcessorEditor::ClubCraftPhase0AudioProcessorEditor(
     matrixSearch.onTextChange = [this] { refreshDynamicUi(); };
     addAndMakeVisible(matrixSearch);
 
+    selectedRouteLabel.setFont(juce::FontOptions(10.0f).withKerningFactor(0.05f));
+    selectedRouteLabel.setColour(juce::Label::textColourId, kGraphite);
+    addAndMakeVisible(selectedRouteLabel);
+    configureDbSlider(selectedRouteGain, selectedRouteGainLabel, "ROUTE GAIN");
+    selectedRouteGain.onValueChange = [this]
+    {
+        if (updatingRouteInspector || selectedRouteSourceId.empty() || selectedRouteSpeakerId.empty())
+            return;
+        const auto gain = juce::Decibels::decibelsToGain(static_cast<float>(selectedRouteGain.getValue()));
+        static_cast<void>(pluginProcessor.setFullRouteGain(selectedRouteSourceId, selectedRouteSpeakerId, gain, false));
+    };
+    selectedRouteGain.onDragEnd = [this]
+    {
+        if (selectedRouteSourceId.empty() || selectedRouteSpeakerId.empty())
+            return;
+        const auto gain = juce::Decibels::decibelsToGain(static_cast<float>(selectedRouteGain.getValue()));
+        static_cast<void>(pluginProcessor.setFullRouteGain(selectedRouteSourceId, selectedRouteSpeakerId, gain, true));
+    };
+    selectedRouteMuteButton.setColour(juce::TextButton::buttonColourId, kWarmAccent);
+    selectedRouteMuteButton.setColour(juce::TextButton::textColourOffId, kPanel);
+    selectedRouteMuteButton.onClick = [this]
+    {
+        const auto scene = pluginProcessor.copyDynamicScene();
+        const auto route = std::find_if(scene.routes.begin(), scene.routes.end(), [this](const auto& item)
+        {
+            return item.sourceId == selectedRouteSourceId && item.speakerStableId == selectedRouteSpeakerId
+                && item.mode == clubcraft::RouteMode::full && item.inputMode == clubcraft::InputChannelMode::sumMono;
+        });
+        if (route != scene.routes.end())
+        {
+            static_cast<void>(pluginProcessor.setFullRouteMuted(selectedRouteSourceId, selectedRouteSpeakerId,
+                                                                 route->enabled));
+            refreshDynamicUi();
+        }
+    };
+    addAndMakeVisible(selectedRouteMuteButton);
+
     routingMatrix = std::make_unique<RoutingMatrix>(pluginProcessor, [this] { refreshDynamicUi(); },
-                                                     [this] { materialiseLegacyRouting(); });
+                                                     [this] { materialiseLegacyRouting(); },
+                                                     [this](const std::string& sourceId, const std::string& speakerId)
+                                                     { selectRoute(sourceId, speakerId); });
     matrixViewport.setViewedComponent(routingMatrix.get(), false);
     matrixViewport.setScrollBarsShown(true, true);
     addAndMakeVisible(matrixViewport);
@@ -548,7 +606,12 @@ void ClubCraftPhase0AudioProcessorEditor::resized()
     selectedSpeakerLevel.setBounds(inspector.reduced(2));
 
     routingLabel.setBounds(right.removeFromTop(22));
-    matrixSearch.setBounds(right.removeFromTop(30).removeFromRight(180).reduced(2));
+    auto routeInspector = right.removeFromTop(34);
+    matrixSearch.setBounds(routeInspector.removeFromRight(168).reduced(2));
+    selectedRouteMuteButton.setBounds(routeInspector.removeFromRight(66).reduced(2));
+    selectedRouteGainLabel.setBounds(routeInspector.removeFromLeft(66));
+    selectedRouteGain.setBounds(routeInspector.reduced(2));
+    selectedRouteLabel.setBounds(right.removeFromTop(20));
     matrixViewport.setBounds(right.withTrimmedTop(4));
 }
 
@@ -612,6 +675,8 @@ void ClubCraftPhase0AudioProcessorEditor::refreshStatus()
     selectedSpeakerType.setEnabled(editable && !selectedSpeakerId.empty());
     selectedSpeakerLevel.setEnabled(editable && !selectedSpeakerId.empty());
     matrixViewport.setEnabled(editable);
+    selectedRouteGain.setEnabled(editable && !selectedRouteSourceId.empty() && !selectedRouteSpeakerId.empty());
+    selectedRouteMuteButton.setEnabled(editable && !selectedRouteSourceId.empty() && !selectedRouteSpeakerId.empty());
     materialiseButton.setVisible(editable && pluginProcessor.copyDynamicScene().legacyDefaultRouting);
 
     if (isClub)
@@ -645,7 +710,8 @@ void ClubCraftPhase0AudioProcessorEditor::refreshDynamicUi()
         selectedSpeakerId.clear();
 
     floorView->setSelectedSpeaker(selectedSpeakerId);
-    routingMatrix->update(scene, pluginProcessor.getKnownSources(), matrixSearch.getText());
+    routingMatrix->update(scene, pluginProcessor.getKnownSources(), matrixSearch.getText(),
+                          selectedRouteSourceId, selectedRouteSpeakerId);
     displayedSceneRevision = pluginProcessor.getControlSceneRevision();
 
     updatingInspector = true;
@@ -664,11 +730,41 @@ void ClubCraftPhase0AudioProcessorEditor::refreshDynamicUi()
         selectedSpeakerLevel.setValue(selected->levelDb, juce::dontSendNotification);
     }
     updatingInspector = false;
+
+    updatingRouteInspector = true;
+    const auto selectedRoute = std::find_if(scene.routes.begin(), scene.routes.end(), [this](const auto& route)
+    {
+        return route.sourceId == selectedRouteSourceId && route.speakerStableId == selectedRouteSpeakerId
+            && route.mode == clubcraft::RouteMode::full && route.inputMode == clubcraft::InputChannelMode::sumMono;
+    });
+    if (selectedRoute == scene.routes.end())
+    {
+        selectedRouteLabel.setText("SELECT AN EXPLICIT ROUTE", juce::dontSendNotification);
+        selectedRouteGain.setValue(-60.0, juce::dontSendNotification);
+        selectedRouteMuteButton.setButtonText("MUTE");
+    }
+    else
+    {
+        selectedRouteLabel.setText("ROUTE  " + juce::String(selectedRoute->sourceId) + " → "
+                                       + juce::String(selectedRoute->speakerStableId),
+                                   juce::dontSendNotification);
+        selectedRouteGain.setValue(juce::Decibels::gainToDecibels(selectedRoute->gainLinear, -60.0f),
+                                   juce::dontSendNotification);
+        selectedRouteMuteButton.setButtonText(selectedRoute->enabled ? "MUTE" : "UNMUTE");
+    }
+    updatingRouteInspector = false;
 }
 
 void ClubCraftPhase0AudioProcessorEditor::selectSpeaker(const std::string& stableId)
 {
     selectedSpeakerId = stableId;
+    refreshDynamicUi();
+}
+
+void ClubCraftPhase0AudioProcessorEditor::selectRoute(const std::string& sourceId, const std::string& speakerStableId)
+{
+    selectedRouteSourceId = sourceId;
+    selectedRouteSpeakerId = speakerStableId;
     refreshDynamicUi();
 }
 

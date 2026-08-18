@@ -76,6 +76,13 @@ public:
     [[nodiscard]] bool setFullRouteEnabled(const std::string& routeSourceId,
                                             const std::string& speakerStableId,
                                             bool enabled);
+    [[nodiscard]] bool setFullRouteGain(const std::string& routeSourceId,
+                                         const std::string& speakerStableId,
+                                         float linearGain,
+                                         bool urgentPublish);
+    [[nodiscard]] bool setFullRouteMuted(const std::string& routeSourceId,
+                                          const std::string& speakerStableId,
+                                          bool muted);
     [[nodiscard]] bool materialiseLegacyRouting();
 
 private:

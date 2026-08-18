@@ -31,6 +31,7 @@ private:
     void addSpeaker();
     void deleteSelectedSpeaker();
     void materialiseLegacyRouting();
+    void selectRoute(const std::string& sourceId, const std::string& speakerStableId);
 
     ClubCraftPhase0AudioProcessor& pluginProcessor;
 
@@ -57,13 +58,20 @@ private:
 
     juce::Label routingLabel;
     juce::TextEditor matrixSearch;
+    juce::Label selectedRouteLabel;
+    juce::Label selectedRouteGainLabel;
+    juce::Slider selectedRouteGain;
+    juce::TextButton selectedRouteMuteButton { "MUTE" };
     juce::TextButton materialiseButton { "MATERIALISE LEGACY ROUTES" };
     juce::Viewport matrixViewport;
     std::unique_ptr<RoutingMatrix> routingMatrix;
 
     std::string selectedSpeakerId;
+    std::string selectedRouteSourceId;
+    std::string selectedRouteSpeakerId;
     std::uint64_t displayedSceneRevision = 0;
     bool updatingInspector = false;
+    bool updatingRouteInspector = false;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> roleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> masterAttachment;
