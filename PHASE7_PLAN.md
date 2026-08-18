@@ -146,3 +146,41 @@ schema≤6からmigrationしたSetでは、4 Speakerへのimplicit Routeが内�
 5. `FULL` Route重複rejectと将来`BAND`共存を両立するRoute identity設計は正しいか。
 6. Source registrationの変化をCLUB UIへ反映するpolling周期と負荷は妥当か。
 7. 0.7.0でroute gainをdB表示にするかlinear保存にするか。
+
+## ChatGPTレビュー反映 — 実装開始前の必須修正
+
+ChatGPTレビューにより、初版計画はそのままでは実装開始しない。詳細は`ARCHITECTURE_GATE_0_7.md`を正本とする。
+
+| ブロッカー | 0.7.0での確定修正 |
+|---|---|
+| Legacy APVTS bridge | DynamicSceneをauthoritativeにする。TimerによるAPVTS→DynamicSceneの一方向上書きを廃止し、旧automation時だけStable ID基準でDynamicSceneへ反映する。 |
+| 無条件compile / publish | `sceneDirty`、`sourceMembershipDirty`、`urgentPublish`を導入し、drag中のcompile / publishは最大30Hz、mouseUpは即時publishとする。 |
+| Route容量 | `MAX_ROUTES_GLOBAL`を512から2048へ変更し、128 SOURCE × 16 SpeakerのMatrixと整合させる。 |
+| 編集transaction | candidate Sceneのcopy → edit → validate / preflight → success時swapを必須にする。compile / Registry publish中はscene mutexを保持しない。 |
+| Legacy materialisation | materialiseと最初のRoute操作を同一transactionにする。capacity failureまたはCancel時はSceneを変更しない。 |
+| gain / mute / drag | Route gain、mute、Speaker Level、pan / path gainへ10〜20ms程度のsmoothingを追加する。 |
+| lifecycle UI | offline SOURCE Routeを保持して灰色表示する。duplicate CLUBはread-only、rekey SOURCEは`NEW / UNROUTED`と表示する。 |
+
+Floor Viewの`RESET LAYOUT`は`RESET POSITIONS`へ改名し、SpeakerまたはRouteを削除しない。Speaker削除時は「関連Route N本も削除される」ことを確認表示する。
+
+> 以後、0.7.0の実装判断は`ARCHITECTURE_GATE_0_7.md`を優先する。初版の`PHASE7_PLAN.md`と矛盾する場合は、Gateの定義を採用する。
+
+## 修正後の実装順序
+
+| 順番 | 実装内容 | 完了条件 |
+|---:|---|---|
+| 0 | Gate A〜Hの再レビュー | ChatGPTが修正版にGOを出す。 |
+| 1 | Legacy bridge反転、scene edit transaction、dirty publish | Floor Viewを作る前にDynamicSceneがauthoritativeになる。 |
+| 2 | Route token / generation、smoothing、2048 Route容量、追加テスト | 連続gain / mute / dragがclickなく、安全に動作する。 |
+| 3 | Floor View、Inspector、Speaker add / delete / listener drag | 最大16 Speakerを安全に編集できる。 |
+| 4 | virtualized Routing Matrix、offline source表示、legacy materialisation dialog | Full Routeを明示操作できる。 |
+| 5 | state / migration / VST3 / AU / Ableton Live検証 | 0.7.0の完了条件を満たす。 |
+
+## 追加された完了条件
+
+1. Speaker drag後にTimerが旧APVTS値で位置を戻さない。
+2. 最後のRoute削除後、SOURCEが古いRoutePlanを使い続けない。
+3. 2,048 Route上限とlegacy materialisationの境界がテスト済みである。
+4. 60〜120Hzのdrag eventでもcompile / publishが30Hzを超えず、mouseUpで最終位置が即時publishされる。
+5. duplicate CLUBではScene編集がread-onlyになり、owner消滅後に次CLUBが編集可能になる。
+6. Debug / Release CTest、VST3 / AU、Intel Mac / Ableton Live試用を通過する。
