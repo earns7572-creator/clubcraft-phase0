@@ -1,4 +1,5 @@
 #include "SceneCompiler.h"
+#include "PendingAutomationMailbox.h"
 #include "SceneState.h"
 #include "TestCheck.h"
 
@@ -135,6 +136,32 @@ void testSceneStateRoundTrip()
     CHECK(restored->legacyRouteGain == 0.25f);
 }
 
+void testPendingAutomationAckAfterCommit()
+{
+    using Field = clubcraft::LegacyAutomationField;
+    clubcraft::PendingAutomationMailbox mailbox;
+
+    mailbox.store(Field::speakerLevel1, -6.0f);
+    const auto timerSnapshot = mailbox.snapshot();
+    CHECK(timerSnapshot[clubcraft::toAutomationIndex(Field::speakerLevel1)].isPending());
+    CHECK(timerSnapshot[clubcraft::toAutomationIndex(Field::speakerLevel1)].value == -6.0f);
+
+    // A state-save interleave sees the value even though Timer has already
+    // snapshotted it. The value is not consumed until Scene commit succeeds.
+    const auto stateSaveSnapshot = mailbox.snapshot();
+    CHECK(stateSaveSnapshot[clubcraft::toAutomationIndex(Field::speakerLevel1)].value == -6.0f);
+    mailbox.acknowledge(timerSnapshot);
+    CHECK(!mailbox.snapshot()[clubcraft::toAutomationIndex(Field::speakerLevel1)].isPending());
+
+    mailbox.store(Field::speakerLevel1, -3.0f);
+    const auto staleTimerSnapshot = mailbox.snapshot();
+    mailbox.store(Field::speakerLevel1, -1.0f);
+    mailbox.acknowledge(staleTimerSnapshot);
+    const auto afterStaleAck = mailbox.snapshot();
+    CHECK(afterStaleAck[clubcraft::toAutomationIndex(Field::speakerLevel1)].isPending());
+    CHECK(afterStaleAck[clubcraft::toAutomationIndex(Field::speakerLevel1)].value == -1.0f);
+}
+
 void testCapacityAndReferenceErrors()
 {
     clubcraft::SceneCompiler compiler;
@@ -177,5 +204,6 @@ void runSceneCompilerTests()
     testLegacyRoutesUseQuarterGain();
     testGenerationChangesWhenSlotIsReused();
     testSceneStateRoundTrip();
+    testPendingAutomationAckAfterCommit();
     testCapacityAndReferenceErrors();
 }

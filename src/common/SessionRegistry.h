@@ -206,6 +206,9 @@ public:
                                                                const std::string& sourceId) const;
     [[nodiscard]] std::optional<SourceRegistration> getSource(const std::string& sourceId) const;
     [[nodiscard]] std::vector<SourceRegistration> getSourcesForSession(const std::string& sessionId) const;
+    // Control-side membership generation. CLUB compares this value before
+    // compiling, so ordinary heartbeat ticks do not trigger SceneCompiler.
+    [[nodiscard]] std::uint64_t getSourceMembershipRevision(const std::string& sessionId) const;
 
     [[nodiscard]] SourceRouteHandle acquireSourceRoute(const std::string& sessionId,
                                                         const std::string& sourceId);
@@ -231,6 +234,7 @@ private:
     std::unordered_map<std::string, SessionHandle> legacySessions;
     std::unordered_map<std::string, DynamicSessionHandle> dynamicSessions;
     std::unordered_map<std::string, std::unordered_map<std::string, SourceRegistration>> sourcesBySession;
+    std::unordered_map<std::string, std::uint64_t> sourceMembershipRevisions;
     std::unordered_map<std::string, std::unordered_map<std::string, SourceRouteHandle>> routeSlotsBySession;
     std::unordered_map<std::string, ClubPublisherState> clubPublishers;
 };

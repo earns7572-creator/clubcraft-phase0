@@ -3,6 +3,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <functional>
+#include <mutex>
+
+#include "PendingAutomationMailbox.h"
 #include "SceneCompiler.h"
 #include "SceneModel.h"
 #include "SessionRegistry.h"
@@ -50,6 +54,21 @@ public:
     [[nodiscard]] bool hasClubConflict() const noexcept;
     [[nodiscard]] bool wasSourceRekeyed() const noexcept;
 
+    enum class SceneEditResult : std::uint8_t
+    {
+        committed,
+        rejected,
+        stale,
+        notAuthoritative,
+    };
+
+    // Control-side API for the 0.7 Floor View, Inspector and Matrix.  It is
+    // never called from processBlock() or parameterChanged().
+    [[nodiscard]] SceneEditResult editDynamicScene(const std::function<bool(clubcraft::DynamicScene&)>& edit,
+                                                   bool urgentPublish = false);
+    [[nodiscard]] clubcraft::DynamicScene copyDynamicScene() const;
+    [[nodiscard]] std::uint64_t getControlSceneRevision() const noexcept;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
@@ -62,6 +81,10 @@ private:
     void restoreLegacyPrimarySpeakerLevel(const juce::ValueTree& restoredState);
     void rebuildLegacyDynamicSceneFromParameters();
     void synchroniseLegacyBridge();
+    void applyPendingAutomation();
+    static void overlayPendingAutomation(clubcraft::DynamicScene& scene,
+                                         const clubcraft::PendingAutomationSnapshot& pending);
+    [[nodiscard]] bool validateCandidateScene(const clubcraft::DynamicScene& candidate) const;
     [[nodiscard]] juce::ValueTree makeSchema7State();
     void restoreSchema7State(const juce::ValueTree& state);
     void restoreLegacyState(const juce::ValueTree& state);
@@ -78,6 +101,14 @@ private:
 
     // 0.6.0 path: CLUB owns control state; SOURCE reads compiled numeric plans.
     clubcraft::DynamicScene dynamicScene;
+    mutable std::mutex sceneEditMutex;
+    std::atomic<std::uint64_t> controlSceneRevision { 1 };
+    clubcraft::PendingAutomationMailbox pendingAutomation;
+    std::atomic<bool> isSynchronisingLegacyMirror { false };
+    std::atomic<bool> sceneDirty { true };
+    std::atomic<bool> sourceMembershipDirty { true };
+    std::atomic<bool> urgentPublish { true };
+    std::atomic<std::uint64_t> lastPublishedSourceMembershipRevision { 0 };
     clubcraft::SceneCompiler sceneCompiler;
     clubcraft::SessionRegistry::DynamicSessionHandle dynamicSessionHandle;
     clubcraft::SessionRegistry::SourceRouteHandle sourceRouteHandle;

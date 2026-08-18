@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace
 {
@@ -41,6 +42,26 @@ constexpr std::array<const char*, clubcraft::kSpeakerCount> kLegacySpeakerNames 
 [[nodiscard]] juce::String legacySpeakerId(std::size_t index)
 {
     return "legacy-speaker-" + juce::String(static_cast<int>(index + 1));
+}
+
+[[nodiscard]] int legacyAutomationFieldForParameter(const juce::String& parameterId) noexcept
+{
+    using Field = clubcraft::LegacyAutomationField;
+    if (parameterId == "masterLevel") return static_cast<int>(Field::masterLevel);
+    if (parameterId == "genericResponseTone") return static_cast<int>(Field::genericResponseTone);
+    if (parameterId == "listenerPositionX") return static_cast<int>(Field::listenerPositionX);
+    if (parameterId == "listenerPositionY") return static_cast<int>(Field::listenerPositionY);
+
+    for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
+    {
+        const auto offset = static_cast<int>(index);
+        if (parameterId == kSpeakerParameterIds[index]) return static_cast<int>(Field::speakerLevel1) + offset;
+        if (parameterId == kSpeakerTypeParameterIds[index]) return static_cast<int>(Field::speakerType1) + offset;
+        if (parameterId == kSpeakerPositionXParameterIds[index]) return static_cast<int>(Field::speakerPositionX1) + offset;
+        if (parameterId == kSpeakerPositionYParameterIds[index]) return static_cast<int>(Field::speakerPositionY1) + offset;
+    }
+
+    return -1;
 }
 }
 
@@ -243,6 +264,81 @@ bool ClubCraftPhase0AudioProcessor::wasSourceRekeyed() const noexcept
     return sourceRekeyed.load(std::memory_order_acquire);
 }
 
+ClubCraftPhase0AudioProcessor::SceneEditResult ClubCraftPhase0AudioProcessor::editDynamicScene(
+    const std::function<bool(clubcraft::DynamicScene&)>& edit, bool shouldUrgentlyPublish)
+{
+    if (!isClubRole() || clubConflict.load(std::memory_order_acquire))
+        return SceneEditResult::notAuthoritative;
+
+    constexpr int kMaxTransactionRetries = 3;
+    for (int attempt = 0; attempt < kMaxTransactionRetries; ++attempt)
+    {
+        clubcraft::DynamicScene candidate;
+        std::uint64_t baseRevision = 0;
+        {
+            const std::scoped_lock lock(sceneEditMutex);
+            candidate = dynamicScene;
+            baseRevision = controlSceneRevision.load(std::memory_order_relaxed);
+        }
+
+        if (!edit(candidate) || !validateCandidateScene(candidate))
+            return SceneEditResult::rejected;
+
+        {
+            const std::scoped_lock lock(sceneEditMutex);
+            if (controlSceneRevision.load(std::memory_order_relaxed) != baseRevision)
+                continue;
+
+            dynamicScene = std::move(candidate);
+            controlSceneRevision.store(baseRevision + 1U, std::memory_order_release);
+        }
+
+        sceneDirty.store(true, std::memory_order_release);
+        snapshotDirty.store(true, std::memory_order_release);
+        if (shouldUrgentlyPublish)
+            urgentPublish.store(true, std::memory_order_release);
+        return SceneEditResult::committed;
+    }
+
+    return SceneEditResult::stale;
+}
+
+clubcraft::DynamicScene ClubCraftPhase0AudioProcessor::copyDynamicScene() const
+{
+    const std::scoped_lock lock(sceneEditMutex);
+    return dynamicScene;
+}
+
+std::uint64_t ClubCraftPhase0AudioProcessor::getControlSceneRevision() const noexcept
+{
+    return controlSceneRevision.load(std::memory_order_acquire);
+}
+
+bool ClubCraftPhase0AudioProcessor::validateCandidateScene(const clubcraft::DynamicScene& candidate) const
+{
+    if (candidate.speakers.size() > clubcraft::kMaxSpeakers
+        || candidate.routes.size() > clubcraft::kMaxRoutesGlobal)
+        return false;
+
+    const auto isFinite = [](float value) { return std::isfinite(value); };
+    if (!isFinite(candidate.listener.x) || !isFinite(candidate.listener.y)
+        || !isFinite(candidate.masterLevelDb) || !isFinite(candidate.genericResponseTone)
+        || candidate.genericResponseTone < 0.0f || candidate.genericResponseTone > 1.0f)
+        return false;
+
+    for (const auto& speaker : candidate.speakers)
+        if (speaker.stableId.empty() || !isFinite(speaker.position.x) || !isFinite(speaker.position.y)
+            || !isFinite(speaker.levelDb))
+            return false;
+
+    for (const auto& route : candidate.routes)
+        if (route.stableId.empty() || route.sourceId.empty() || route.speakerStableId.empty()
+            || !isFinite(route.gainLinear) || route.gainLinear < 0.0f)
+            return false;
+
+    return true;
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout ClubCraftPhase0AudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> parameterLayout;
@@ -295,10 +391,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout ClubCraftPhase0AudioProcesso
     return { parameterLayout.begin(), parameterLayout.end() };
 }
 
-void ClubCraftPhase0AudioProcessor::parameterChanged(const juce::String& parameterId, float)
+void ClubCraftPhase0AudioProcessor::parameterChanged(const juce::String& parameterId, float newValue)
 {
-    if (parameterId == "role" || isClubRole())
+    // JUCE may call this listener synchronously from an audio callback. Keep
+    // the path to a field lookup plus one atomic mailbox write only.
+    if (parameterId == "role")
+    {
         snapshotDirty.store(true, std::memory_order_release);
+        sceneDirty.store(true, std::memory_order_release);
+        urgentPublish.store(true, std::memory_order_release);
+        return;
+    }
+
+    if (isSynchronisingLegacyMirror.load(std::memory_order_acquire))
+        return;
+
+    const auto fieldIndex = legacyAutomationFieldForParameter(parameterId);
+    if (fieldIndex < 0)
+        return;
+
+    pendingAutomation.store(static_cast<clubcraft::LegacyAutomationField>(fieldIndex), newValue);
 }
 
 void ClubCraftPhase0AudioProcessor::timerCallback()
@@ -306,6 +418,7 @@ void ClubCraftPhase0AudioProcessor::timerCallback()
     reconcileRole();
     if (isClubRole())
     {
+        applyPendingAutomation();
         synchroniseLegacyBridge();
         publishClubScenes();
     }
@@ -335,15 +448,28 @@ void ClubCraftPhase0AudioProcessor::publishClubScenes()
     if (!publisher.authoritative)
         return;
 
+    const auto membershipRevision = registry.getSourceMembershipRevision(sessionId.toStdString());
+    const auto membershipChanged = membershipRevision
+        != lastPublishedSourceMembershipRevision.load(std::memory_order_acquire);
+    if (!sceneDirty.load(std::memory_order_acquire)
+        && !sourceMembershipDirty.load(std::memory_order_acquire)
+        && !urgentPublish.load(std::memory_order_acquire)
+        && !snapshotDirty.load(std::memory_order_acquire)
+        && !membershipChanged)
+        return;
+
     const auto sources = registry.getSourcesForSession(sessionId.toStdString());
     std::vector<std::string> sourceIds;
     sourceIds.reserve(sources.size());
     for (const auto& source : sources)
         sourceIds.push_back(source.sourceId);
 
+    // The copy is made under the short control mutex; validation, compile and
+    // Registry publish happen after it has been released.
+    const auto sceneForCompile = copyDynamicScene();
     clubcraft::CompiledScene compiled;
     const auto nextRevision = revision.fetch_add(1, std::memory_order_relaxed) + 1;
-    const auto compileError = sceneCompiler.compile(dynamicScene, sourceIds, nextRevision, compiled);
+    const auto compileError = sceneCompiler.compile(sceneForCompile, sourceIds, nextRevision, compiled);
     if (compileError.hasError())
         return;
 
@@ -358,6 +484,10 @@ void ClubCraftPhase0AudioProcessor::publishClubScenes()
             return;
     }
 
+    lastPublishedSourceMembershipRevision.store(membershipRevision, std::memory_order_release);
+    sceneDirty.store(false, std::memory_order_release);
+    sourceMembershipDirty.store(false, std::memory_order_release);
+    urgentPublish.store(false, std::memory_order_release);
     snapshotDirty.store(false, std::memory_order_release);
 }
 
@@ -470,29 +600,64 @@ void ClubCraftPhase0AudioProcessor::rebuildLegacyDynamicSceneFromParameters()
     }
 }
 
+void ClubCraftPhase0AudioProcessor::overlayPendingAutomation(
+    clubcraft::DynamicScene& scene, const clubcraft::PendingAutomationSnapshot& pending)
+{
+    using Field = clubcraft::LegacyAutomationField;
+    const auto valueFor = [&](Field field) { return pending[clubcraft::toAutomationIndex(field)].value; };
+    const auto has = [&](Field field) { return pending[clubcraft::toAutomationIndex(field)].isPending(); };
+
+    if (has(Field::masterLevel)) scene.masterLevelDb = valueFor(Field::masterLevel);
+    if (has(Field::genericResponseTone)) scene.genericResponseTone = valueFor(Field::genericResponseTone);
+    if (has(Field::listenerPositionX)) scene.listener.x = valueFor(Field::listenerPositionX);
+    if (has(Field::listenerPositionY)) scene.listener.y = valueFor(Field::listenerPositionY);
+
+    for (std::size_t index = 0; index < clubcraft::kSpeakerCount; ++index)
+    {
+        const auto stableId = legacySpeakerId(index).toStdString();
+        const auto speaker = std::find_if(scene.speakers.begin(), scene.speakers.end(),
+                                          [&stableId](const auto& item) { return item.stableId == stableId; });
+        if (speaker == scene.speakers.end())
+            continue;
+
+        const auto offset = static_cast<int>(index);
+        const auto level = static_cast<Field>(static_cast<int>(Field::speakerLevel1) + offset);
+        const auto type = static_cast<Field>(static_cast<int>(Field::speakerType1) + offset);
+        const auto x = static_cast<Field>(static_cast<int>(Field::speakerPositionX1) + offset);
+        const auto y = static_cast<Field>(static_cast<int>(Field::speakerPositionY1) + offset);
+        if (has(level)) speaker->levelDb = valueFor(level);
+        if (has(type)) speaker->type = clubcraft::speakerTypeFromParameterIndex(static_cast<int>(valueFor(type)));
+        if (has(x)) speaker->position.x = valueFor(x);
+        if (has(y)) speaker->position.y = valueFor(y);
+    }
+}
+
+void ClubCraftPhase0AudioProcessor::applyPendingAutomation()
+{
+    const auto pending = pendingAutomation.snapshot();
+    if (!pendingAutomation.hasPending(pending))
+        return;
+
+    const auto result = editDynamicScene(
+        [&pending](clubcraft::DynamicScene& candidate)
+        {
+            overlayPendingAutomation(candidate, pending);
+            return true;
+        },
+        false);
+    if (result == SceneEditResult::committed)
+        pendingAutomation.acknowledge(pending);
+}
+
 void ClubCraftPhase0AudioProcessor::synchroniseLegacyBridge()
 {
-    if (dynamicScene.speakers.empty())
-        rebuildLegacyDynamicSceneFromParameters();
-
-    dynamicScene.masterLevelDb = readParameter(parameters, "masterLevel");
-    dynamicScene.genericResponseTone = readParameter(parameters, "genericResponseTone");
-    dynamicScene.listener = {
-        readParameter(parameters, "listenerPositionX"),
-        readParameter(parameters, "listenerPositionY"),
-    };
-
-    const auto bridgedSpeakerCount = std::min(dynamicScene.speakers.size(), clubcraft::kSpeakerCount);
-    for (std::size_t index = 0; index < bridgedSpeakerCount; ++index)
+    // DynamicScene is authoritative from 0.7.0.  UI edits may mirror values
+    // back to APVTS later, but this Timer never overwrites Scene from APVTS.
+    if (copyDynamicScene().speakers.empty())
     {
-        auto& speaker = dynamicScene.speakers[index];
-        speaker.levelDb = readParameter(parameters, kSpeakerParameterIds[index]);
-        speaker.type = clubcraft::speakerTypeFromParameterIndex(
-            static_cast<int>(readParameter(parameters, kSpeakerTypeParameterIds[index])));
-        speaker.position = {
-            readParameter(parameters, kSpeakerPositionXParameterIds[index]),
-            readParameter(parameters, kSpeakerPositionYParameterIds[index]),
-        };
+        std::scoped_lock lock(sceneEditMutex);
+        if (dynamicScene.speakers.empty())
+            rebuildLegacyDynamicSceneFromParameters();
     }
 }
 
@@ -506,8 +671,40 @@ juce::ValueTree ClubCraftPhase0AudioProcessor::makeSchema7State()
     juce::ValueTree apvtsWrapper { kSchema7ApvtsType };
     apvtsWrapper.appendChild(parameters.copyState(), nullptr);
     state.appendChild(apvtsWrapper, nullptr);
-    if (isClubRole())
-        state.appendChild(clubcraft::scene_state::toValueTree(dynamicScene), nullptr);
+    if (!isClubRole())
+        return state;
+
+    clubcraft::DynamicScene sceneForState;
+    constexpr int kMaxStateSnapshotRetries = 3;
+    bool copied = false;
+    for (int attempt = 0; attempt < kMaxStateSnapshotRetries; ++attempt)
+    {
+        const auto before = controlSceneRevision.load(std::memory_order_acquire);
+        {
+            const std::scoped_lock lock(sceneEditMutex);
+            sceneForState = dynamicScene;
+        }
+        const auto pending = pendingAutomation.snapshot();
+        const auto after = controlSceneRevision.load(std::memory_order_acquire);
+        if (before != after)
+            continue;
+
+        overlayPendingAutomation(sceneForState, pending);
+        copied = true;
+        break;
+    }
+
+    if (!copied)
+    {
+        // State saving never runs on audio thread. Holding the scene mutex only
+        // for the copy prevents a Timer commit / acknowledgement interleave.
+        const std::scoped_lock lock(sceneEditMutex);
+        sceneForState = dynamicScene;
+        const auto pending = pendingAutomation.snapshot();
+        overlayPendingAutomation(sceneForState, pending);
+    }
+
+    state.appendChild(clubcraft::scene_state::toValueTree(sceneForState), nullptr);
     return state;
 }
 

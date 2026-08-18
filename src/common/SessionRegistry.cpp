@@ -352,6 +352,7 @@ SourceRegistrationResult SessionRegistry::registerSource(SourceRegistration regi
     const auto sourceId = registration.sourceId;
     sources.emplace(sourceId, std::move(registration));
     routeSlotsBySession[sessionId].try_emplace(sourceId, std::make_shared<SourceRouteSlot>());
+    ++sourceMembershipRevisions[sessionId];
     return { SourceRegistrationStatus::accepted };
 }
 
@@ -360,7 +361,8 @@ void SessionRegistry::unregisterSource(const std::string& sessionId, const std::
     std::scoped_lock lock { mutex };
     if (const auto iterator = sourcesBySession.find(sessionId); iterator != sourcesBySession.end())
     {
-        iterator->second.erase(sourceId);
+        if (iterator->second.erase(sourceId) > 0)
+            ++sourceMembershipRevisions[sessionId];
         if (iterator->second.empty())
             sourcesBySession.erase(iterator);
     }
@@ -378,7 +380,9 @@ void SessionRegistry::unregisterSource(const std::string& sourceId)
     std::scoped_lock lock { mutex };
     for (auto sourceIterator = sourcesBySession.begin(); sourceIterator != sourcesBySession.end();)
     {
-        sourceIterator->second.erase(sourceId);
+        const auto sessionId = sourceIterator->first;
+        if (sourceIterator->second.erase(sourceId) > 0)
+            ++sourceMembershipRevisions[sessionId];
         if (sourceIterator->second.empty())
             sourceIterator = sourcesBySession.erase(sourceIterator);
         else
@@ -433,6 +437,15 @@ std::vector<SourceRegistration> SessionRegistry::getSourcesForSession(const std:
         }
     }
     return result;
+}
+
+std::uint64_t SessionRegistry::getSourceMembershipRevision(const std::string& sessionId) const
+{
+    std::scoped_lock lock { mutex };
+    if (const auto revision = sourceMembershipRevisions.find(sessionId);
+        revision != sourceMembershipRevisions.end())
+        return revision->second;
+    return 0;
 }
 
 SessionRegistry::SourceRouteHandle SessionRegistry::acquireSourceRoute(const std::string& sessionId,
@@ -526,6 +539,7 @@ void SessionRegistry::resetForTests()
     legacySessions.clear();
     dynamicSessions.clear();
     sourcesBySession.clear();
+    sourceMembershipRevisions.clear();
     routeSlotsBySession.clear();
     clubPublishers.clear();
 }
