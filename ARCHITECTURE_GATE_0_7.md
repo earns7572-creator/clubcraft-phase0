@@ -155,7 +155,9 @@ NaN、Inf、負のgain、無効なdB値はcontrol-sideでrejectする。
 
 - 最初の4 legacy SpeakerのLevel、Type、X、YとListener、Master、Response Toneについて、atomic pending valueとdirty bitを持つ。
 - callbackはpending valueをstoreしてdirty bitをsetするだけで終了する。
-- Timerはpending bitを交換して取得し、Stable ID `legacy-speaker-N`でcandidate Sceneへ適用する。
+- Timer / AsyncUpdaterはpending mailboxを**非破壊のrevision付きseqlock snapshot**として取得し、Stable ID `legacy-speaker-N`でcandidate Sceneへ適用する。snapshot取得時にdirty bit、pending value、pending revisionをclearしてはならない。
+- candidate SceneのCAS commitが成功した後だけ、各mailbox slotの`pendingRevision`がsnapshot時のrevisionと一致することをcompare-and-swapで確認し、一致するslotだけをack / consumeする。snapshot後に新しいautomationが来てrevisionが変わったslotはclearせず、次のTimer tickへ残す。
+- candidateのvalidate / preflight / CAS retryが失敗した場合、snapshotしたmailbox slotをack / consumeしてはならない。
 - Floor Viewからlegacy Speakerを編集した時は、DynamicScene commit後にAPVTSをmirrorできる。ただしcallbackで同値pendingを受け取っても、TimerはScene値と比較してno-opにする。
 - `isSynchronisingLegacyMirror`は補助guardに留め、正しさをguardだけへ依存しない。
 
@@ -229,6 +231,7 @@ Gate Hのテストに、以下を追加する。
 8. Route muteとSpeaker muteが10ms ramp後にsilentになり、clickを出さない。
 9. gain 0、NaN、Inf、負のgainがUIまたはDSPへ入らない。
 10. pending automation中にHost state保存しても、保存Stateが矛盾しない。
+11. Timerがpending mailboxをsnapshotした後、Scene commit前にHost state保存が発生しても、pending automation値が保存Stateから消えない。
 
 ## 更新後のGO条件
 
@@ -246,6 +249,7 @@ DynamicSceneはauthoritativeだが、Hostがstateを要求した瞬間にAPVTS p
 6. State保存のためにauthoritative DynamicScene、pending mailbox、APVTS parameterを変更してはならない。
 
 - save中に新しいparameterChangedが来ても、mailbox snapshot revisionが一致する一組だけを使う。中途半端な複数parameter値を混在させない。
+- Timerがcandidate作成のためにmailboxをsnapshot済みでも、CAS commit成功後のrevision付きackまでmailboxはpendingのままである。したがって、その間のHost state保存は同じpending valueをoverlayして保存し、automation値を失わない。
 - 次のTimer tickは通常どおりpending mailboxをauthoritative DynamicSceneへ適用する。
 - state restoreはEditorを開かなくても同じDynamicSceneを復元できる。
 
@@ -293,7 +297,8 @@ retry exhausted:
 ```
 
 - `controlSceneRevisionBefore != controlSceneRevisionAfter`なら、そのScene copyとmailbox snapshotを捨てて最初からretryする。
-- pending mailboxもrevision / seqlockで読む。複数legacy parameterの中途半端な組合せを保存してはならない。
+- pending mailboxもrevision / seqlockで**非破壊に**読む。複数legacy parameterの中途半端な組合せを保存してはならない。
+- Timerのcandidate transactionはsnapshotしたmailbox revisionを保持する。commit成功後だけ、そのrevisionと現在の`pendingRevision`が一致するslotをack / consumeする。commit前、commit失敗時、CAS retry時にmailboxをclearしてはならない。
 - State保存のためにauthoritative DynamicScene、pending mailbox、APVTS parameterを変更してはならない。
 - retry上限到達時のfallbackはaudio threadから呼ばれないState保存経路だけで実行する。`sceneEditMutex`を保持したままauthoritative Scene copyの直後にmailboxをlock-free seqlock snapshotし、その後unlockする。この順序によりTimer / AsyncUpdaterはScene commitとmailbox clearをsnapshot途中へ挿入できない。parameterChanged()はmutexを取らず、seqlock writerとして更新できる。Compiler、Registry、Host notificationをmutex保持中に呼ばない。
 
@@ -320,9 +325,10 @@ Gate H / Mのテストに、以下を追加する。
 1. Scene copy直後にTimerがpending automationをcommitするinterleaveで、Gate Pがrevision mismatchを検出してretryし、旧Scene + clear mailboxを保存しない。
 2. pending mailbox seqlockが複数legacy parameterを一貫してsnapshotする。
 3. State保存中に新automationが来ても、保存Sceneはcommit済みSceneまたは明確にoverlay済みSceneのどちらかであり、混在しない。
-4. 16 Routeを同時削除して16 retiring Voiceを作り、直後に16新Routeを追加しても、16 active + 16 retiringをallocationなしで処理する。
-5. routeSlot再利用時、旧generation retiring VoiceのDSP stateが新generation active Voiceへ混入しない。
-6. 10ms後にretiring Voice数が0へ戻り、last Route deletion後は新0-route revisionを使ってsilentになる。
+4. Timerがmailboxを非破壊snapshotした直後、Scene commit前にHost state保存をinterleaveしても、automation値が保存Stateから消えない。CAS retry / preflight failure時もmailboxがpendingのまま残る。
+5. 16 Routeを同時削除して16 retiring Voiceを作り、直後に16新Routeを追加しても、16 active + 16 retiringをallocationなしで処理する。
+6. routeSlot再利用時、旧generation retiring VoiceのDSP stateが新generation active Voiceへ混入しない。
+7. 10ms後にretiring Voice数が0へ戻り、last Route deletion後は新0-route revisionを使ってsilentになる。
 
 ## 最終GO条件
 

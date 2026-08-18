@@ -500,10 +500,10 @@ Speakerが鳴っていることをClub Viewで分かるようにする。
 - SOURCE一覧、offline source表示、virtualized Routing Matrix
 - SOURCE→Speakerのone-to-many Full + SUM_MONO Route create/delete/mute/gain
 - legacy implicit 0.25 Routeの確認付きmaterialisation
-- DynamicScene authoritative、legacy APVTS pending mailbox、Stable ID bridge
+- DynamicScene authoritative、legacy APVTS pending mailbox、Stable ID bridge。Timer / AsyncUpdaterはmailboxを非破壊のrevision付きsnapshotとして読み、DynamicSceneのCAS commit成功後に一致するrevisionだけをack / consumeする。
 - revision付きcandidate transaction、30Hz drag publish、mouseUp即時publish
 - 2048 global Route、persistent route slot + generation、gain / mute smoothing、Route delete後のfade-out
-- pending APVTS automationをoverlayして矛盾しないschema 7 Stateを保存
+- pending APVTS automationを非破壊snapshotでoverlayして矛盾しないschema 7 Stateを保存する。Timer snapshot後・Scene commit前の保存でもautomation値を失わず、commit失敗時もmailboxを保持する。
 - duplicate CLUB read-only、duplicate SOURCE rekey
 
 ### 0.8.0 — Band Routing + System Balance

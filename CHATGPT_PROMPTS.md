@@ -131,13 +131,13 @@ GitHubの https://github.com/earns7572-creator/clubcraft-phase0 の main ブラ�
 - `MAX_SPEAKERS=16`、`MAX_SOURCES=128`、`MAX_ROUTES_GLOBAL=2048`、`MAX_ROUTES_PER_SOURCE=16`。
 - DynamicSceneがauthoritative control state。旧APVTSは最初の4 legacy Speakerだけのcompatibility / host automation bridge。
 - parameterChanged()はatomic pending value + dirty flagだけを更新する。mutex、vector、string、UUID、ValueTree、SceneCompiler、Registryを触らない。
-- Timer / AsyncUpdaterのmessage threadでpending automationをStable ID `legacy-speaker-N`へ適用する。
+- Timer / AsyncUpdaterのmessage threadはpending automationを非破壊のrevision付きseqlock snapshotとしてStable ID `legacy-speaker-N`へ適用する。candidateのCAS commit成功後だけ、一致する`pendingRevision`をack / consumeする。commit前、preflight failure、CAS retry時にmailboxをclearしてはならない。
 - すべてのScene editはbaseSceneRevisionを持つcandidate transaction。stale candidateはretry / rebaseし、lost updateを起こさない。
 - sceneEditMutexはcopy / swapだけ。compile、Registry publish、ValueTree、Host parameter通知中はmutexを保持しない。
 - drag publishは最大30Hz、mouseUpは最終位置を即時publishする。
 - Stable Route IDをpersistent routeSlot + routeGenerationへ対応させる。Renderer stateをRoutePlan配列indexに紐付けない。
 - route enabled=falseとSpeaker muteは即skipしない。target gain=0へ10〜20ms rampし、fade完了後にsilentにする。Route deleteでPlanから消えたVoiceもretiring状態で10ms fade-outしてからDSP stateをreleaseする。
-- Host state保存ではauthoritative Scene copyへpending automation mailboxのrevision付きsnapshotをoverlayしてserializeする。保存のためにauthoritative Sceneやmailboxを変更しない。
+- Host state保存ではauthoritative Scene copyへpending automation mailboxの非破壊revision付きsnapshotをoverlayしてserializeする。Scene copy前後のrevision不一致はretryし、Timer snapshot後・Scene commit前の保存でもautomation値を失わない。保存のためにauthoritative Sceneやmailboxを変更しない。
 - legacy materialisationと最初のRoute操作は同一candidate transaction。Cancel / capacity failureではSceneを一切変更しない。
 - SOURCE unregister時にpersisted RouteConfigを削除しない。offline rowとして表示する。duplicate SOURCEはnew/unrouted、duplicate CLUBはread-only。
 - Band DSP、HRTF、完成版Binaural、4ch / 8ch本出力、RTAは実装しない。
